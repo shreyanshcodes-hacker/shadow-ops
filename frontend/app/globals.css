@@ -1,0 +1,314 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 10 10 10;
+    --foreground: 245 245 245;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  html {
+    @apply scroll-smooth;
+  }
+
+  body {
+    @apply bg-background-DEFAULT text-foreground-DEFAULT antialiased;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  }
+
+  /* Custom scrollbar */
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  ::-webkit-scrollbar-track {
+    @apply bg-background-secondary;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    @apply bg-border-light rounded-full;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-border-focus;
+  }
+
+  /* Focus styles */
+  :focus-visible {
+    @apply outline-none ring-2 ring-accent-DEFAULT ring-offset-2 ring-offset-background-DEFAULT;
+  }
+
+  /* Selection */
+  ::selection {
+    @apply bg-accent-glow text-foreground-DEFAULT;
+  }
+}
+
+@layer components {
+  /* Glass card effect */
+  .glass-card {
+    @apply bg-background-card/80 backdrop-blur-sm border border-border-DEFAULT;
+  }
+
+  .glass-card-hover {
+    @apply glass-card transition-all duration-normal hover:bg-background-cardHover/90 hover:border-border-light hover:shadow-card-hover;
+  }
+
+  /* Button variants */
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-md px-3 py-1.5 text-sm font-medium transition-all duration-fast focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-DEFAULT focus-visible:ring-offset-2 focus-visible:ring-offset-background-DEFAULT disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  .btn-primary {
+    @apply btn bg-accent-DEFAULT text-white hover:bg-accent-hover active:bg-accent-muted shadow-glow;
+  }
+
+  .btn-secondary {
+    @apply btn bg-background-tertiary text-foreground-DEFAULT border border-border-DEFAULT hover:bg-background-cardHover hover:border-border-light;
+  }
+
+  .btn-ghost {
+    @apply btn text-foreground-muted hover:bg-background-tertiary hover:text-foreground-DEFAULT;
+  }
+
+  .btn-danger {
+    @apply btn bg-background-tertiary text-severity-critical border border-severity-critical/30 hover:bg-severity-critical/10 hover:border-severity-critical;
+  }
+
+  .btn-sm {
+    @apply px-2.5 py-1 text-xs;
+  }
+
+  .btn-lg {
+    @apply px-4 py-2 text-base;
+  }
+
+  /* Input variants */
+  .input {
+    @apply w-full rounded-md bg-background-tertiary border border-border-DEFAULT px-3 py-2 text-sm text-foreground-DEFAULT placeholder:text-foreground-subtle transition-all duration-fast;
+  }
+
+  .input:focus {
+    @apply border-accent-DEFAULT ring-2 ring-accent-glow;
+  }
+
+  .input-error {
+    @apply border-status-error focus:border-status-error focus:ring-status-error/20;
+  }
+
+  .input-label {
+    @apply block text-xs font-medium text-foreground-muted mb-1.5;
+  }
+
+  /* Badge variants */
+  .badge {
+    @apply inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium;
+  }
+
+  .badge-critical {
+    @apply badge bg-severity-critical/15 text-severity-critical border border-severity-critical/30;
+  }
+
+  .badge-high {
+    @apply badge bg-severity-high/15 text-severity-high border border-severity-high/30;
+  }
+
+  .badge-medium {
+    @apply badge bg-severity-medium/15 text-severity-medium border border-severity-medium/30;
+  }
+
+  .badge-low {
+    @apply badge bg-severity-low/15 text-severity-low border border-severity-low/30;
+  }
+
+  .badge-info {
+    @apply badge bg-severity-info/15 text-severity-info border border-severity-info/30;
+  }
+
+  .badge-success {
+    @apply badge bg-status-success/15 text-status-success border border-status-success/30;
+  }
+
+  .badge-warning {
+    @apply badge bg-status-warning/15 text-status-warning border border-status-warning/30;
+  }
+
+  .badge-pending {
+    @apply badge bg-background-tertiary text-foreground-muted border border-border-DEFAULT;
+  }
+
+  /* Table styles */
+  .table-container {
+    @apply overflow-x-auto rounded-md border border-border-DEFAULT;
+  }
+
+  .table {
+    @apply w-full border-collapse text-sm;
+  }
+
+  .table th {
+    @apply text-left px-3 py-2.5 text-xs font-medium text-foreground-muted uppercase tracking-wider bg-background-secondary border-b border-border-DEFAULT;
+  }
+
+  .table td {
+    @apply px-3 py-2.5 text-foreground-DEFAULT border-b border-border-DEFAULT;
+  }
+
+  .table tr:last-child td {
+    @apply border-b-0;
+  }
+
+  .table tbody tr {
+    @apply transition-colors duration-fast hover:bg-background-tertiary/50;
+  }
+
+  /* Card styles */
+  .card {
+    @apply glass-card rounded-lg p-4;
+  }
+
+  .card-hover {
+    @apply glass-card-hover rounded-lg p-4;
+  }
+
+  /* Empty state */
+  .empty-state {
+    @apply flex flex-col items-center justify-center py-12 px-4 text-center;
+  }
+
+  .empty-state-icon {
+    @apply text-foreground-subtle mb-3;
+  }
+
+  .empty-state-title {
+    @apply text-base font-medium text-foreground-DEFAULT mb-1;
+  }
+
+  .empty-state-description {
+    @apply text-sm text-foreground-muted max-w-sm;
+  }
+
+  /* Loading states */
+  .skeleton {
+    @apply animate-pulse bg-background-tertiary rounded;
+  }
+
+  .skeleton-text {
+    @apply skeleton h-4 w-full;
+  }
+
+  .skeleton-text:last-child {
+    @apply w-3/4;
+  }
+
+  .skeleton-card {
+    @apply skeleton h-32 w-full rounded-lg;
+  }
+
+  /* Dialog/Modal */
+  .dialog-overlay {
+    @apply fixed inset-0 bg-black/60 backdrop-blur-sm z-50;
+  }
+
+  .dialog-content {
+    @apply fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-50 w-full max-w-lg rounded-lg bg-background-card border border-border-DEFAULT shadow-card-hover p-6 animate-slide-up;
+  }
+
+  .dialog-header {
+    @apply flex items-center justify-between mb-4;
+  }
+
+  .dialog-title {
+    @apply text-lg font-semibold text-foreground-DEFAULT;
+  }
+
+  .dialog-close {
+    @apply btn-ghost p-1 rounded-md hover:bg-background-tertiary;
+  }
+
+  /* Tooltip */
+  .tooltip {
+    @apply absolute z-50 px-2 py-1 text-xs text-white bg-background-tertiary border border-border-DEFAULT rounded shadow-card pointer-events-none;
+  }
+
+  /* Dropdown */
+  .dropdown {
+    @apply absolute right-0 mt-1.5 min-w-[160px] rounded-md bg-background-card border border-border-DEFAULT shadow-card-hover py-1 z-50 animate-slide-down;
+  }
+
+  .dropdown-item {
+    @apply flex items-center gap-2 px-3 py-2 text-sm text-foreground-DEFAULT hover:bg-background-tertiary transition-colors;
+  }
+
+  .dropdown-divider {
+    @apply h-px bg-border-DEFAULT my-1;
+  }
+
+  /* Tabs */
+  .tabs {
+    @apply flex gap-1 bg-background-tertiary rounded-md p-1;
+  }
+
+  .tab {
+    @apply px-3 py-1.5 text-sm font-medium text-foreground-muted rounded-sm transition-all duration-fast hover:text-foreground-DEFAULT;
+  }
+
+  .tab-active {
+    @apply bg-background-card text-foreground-DEFAULT shadow-card;
+  }
+
+  /* Tooltip trigger */
+  .tooltip-trigger {
+    @apply relative inline-flex;
+  }
+
+  .tooltip-trigger:hover .tooltip {
+    @apply block;
+  }
+
+  /* Alert */
+  .alert {
+    @apply flex gap-3 rounded-lg border p-4;
+  }
+
+  .alert-info {
+    @apply alert border-status-info/30 bg-status-info/10 text-status-info;
+  }
+
+  .alert-success {
+    @apply alert border-status-success/30 bg-status-success/10 text-status-success;
+  }
+
+  .alert-warning {
+    @apply alert border-status-warning/30 bg-status-warning/10 text-status-warning;
+  }
+
+  .alert-error {
+    @apply alert border-status-error/30 bg-status-error/10 text-status-error;
+  }
+}
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+
+  .animate-in {
+    animation: fade-in 200ms ease-out;
+  }
+
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+}
