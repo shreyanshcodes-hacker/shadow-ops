@@ -637,3 +637,200 @@ class AiProviderStatus(BaseSchema):
     provider: AiProviderType
     configured: bool
     model: Optional[str] = None
+
+
+class RelationshipSource(str, enum.Enum):
+    DETERMINISTIC = "deterministic"
+    AI_SUGGESTED = "ai_suggested"
+    HUMAN_CONFIRMED = "human_confirmed"
+
+
+class RelationshipType(str, enum.Enum):
+    DEPENDS_ON = "depends_on"
+    ENABLES = "enables"
+    EXPOSES = "exposes"
+    LEADS_TO = "leads_to"
+    SHARES_COMPONENT = "shares_component"
+    SHARES_ENTRY_POINT = "shares_entry_point"
+    SHARES_DATA_FLOW = "shares_data_flow"
+    AMPLIFIES = "amplifies"
+
+
+class AttackPathStatus(str, enum.Enum):
+    DRAFT = "draft"
+    ACTIVE = "active"
+    DISMISSED = "dismissed"
+    RESOLVED = "resolved"
+
+
+class AttackPathNodeType(str, enum.Enum):
+    ENTRY = "entry"
+    FINDING = "finding"
+    BOUNDARY = "boundary"
+    IMPACT = "impact"
+
+
+class RiskBand(str, enum.Enum):
+    INFORMATIONAL = "informational"
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+    CRITICAL = "critical"
+
+
+# Finding Relationship schemas
+class FindingRelationshipBase(BaseSchema):
+    source_finding_id: UUID
+    target_finding_id: UUID
+    relationship_type: RelationshipType
+    confidence: float = Field(ge=0.0, le=1.0)
+    source: RelationshipSource
+    rationale: str
+    evidence_reference: Optional[str] = None
+
+
+class FindingRelationshipCreate(FindingRelationshipBase):
+    pass
+
+
+class FindingRelationshipResponse(FindingRelationshipBase):
+    id: UUID
+    workspace_id: UUID
+    created_at: datetime
+    updated_at: datetime
+    source_finding: Optional["FindingListResponse"] = None
+    target_finding: Optional["FindingListResponse"] = None
+
+
+# Attack Path schemas
+class AttackPathBase(BaseSchema):
+    asset_id: UUID
+    title: str
+    description: str = ""
+    status: AttackPathStatus = AttackPathStatus.DRAFT
+    confidence: float = Field(ge=0.0, le=1.0, default=0.0)
+    severity: str = "unknown"
+    risk_score: Optional[int] = Field(default=None, ge=0, le=100)
+    risk_model_version: str = "risk-v1"
+
+
+class AttackPathCreate(AttackPathBase):
+    pass
+
+
+class AttackPathUpdate(BaseSchema):
+    title: Optional[str] = None
+    description: Optional[str] = None
+    status: Optional[AttackPathStatus] = None
+    confidence: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    severity: Optional[str] = None
+
+
+class AttackPathNodeBase(BaseSchema):
+    finding_id: Optional[UUID] = None
+    sequence: int
+    node_type: AttackPathNodeType
+    rationale: str = ""
+
+
+class AttackPathNodeCreate(AttackPathNodeBase):
+    pass
+
+
+class AttackPathNodeResponse(AttackPathNodeBase):
+    id: UUID
+    attack_path_id: UUID
+    created_at: datetime
+    updated_at: datetime
+    finding: Optional["FindingListResponse"] = None
+
+
+class AttackPathEdgeBase(BaseSchema):
+    source_node_id: UUID
+    target_node_id: UUID
+    relationship_type: RelationshipType
+    confidence: float = Field(ge=0.0, le=1.0)
+    source: RelationshipSource
+    rationale: str
+
+
+class AttackPathEdgeCreate(AttackPathEdgeBase):
+    pass
+
+
+class AttackPathEdgeResponse(AttackPathEdgeBase):
+    id: UUID
+    attack_path_id: UUID
+    created_at: datetime
+    source_node: Optional["AttackPathNodeResponse"] = None
+    target_node: Optional["AttackPathNodeResponse"] = None
+
+
+class AttackPathResponse(AttackPathBase):
+    id: UUID
+    workspace_id: UUID
+    created_at: datetime
+    updated_at: datetime
+    nodes: List["AttackPathNodeResponse"] = Field(default_factory=list)
+    edges: List["AttackPathEdgeResponse"] = Field(default_factory=list)
+    asset: Optional["AssetResponse"] = None
+
+
+class AttackPathListResponse(BaseSchema):
+    id: UUID
+    workspace_id: UUID
+    asset_id: UUID
+    title: str
+    status: AttackPathStatus
+    confidence: float
+    severity: str
+    risk_score: Optional[int] = None
+    risk_band: Optional[RiskBand] = None
+    node_count: int = 0
+    created_at: datetime
+    updated_at: datetime
+
+
+# Risk Snapshot schemas
+class RiskSnapshotBase(BaseSchema):
+    attack_path_id: UUID
+    score: int = Field(ge=0, le=100)
+    risk_band: RiskBand
+    model_version: str
+    factors: Dict[str, Any]
+
+
+class RiskSnapshotCreate(RiskSnapshotBase):
+    pass
+
+
+class RiskSnapshotResponse(RiskSnapshotBase):
+    id: UUID
+    workspace_id: UUID
+    calculated_at: datetime
+
+
+# Risk Calculation schemas
+class RiskFactor(BaseSchema):
+    name: str
+    weight: float
+    value: float
+    contribution: float
+    description: str
+
+
+class RiskCalculationResult(BaseSchema):
+    score: int = Field(ge=0, le=100)
+    risk_band: RiskBand
+    model_version: str
+    factors: List[RiskFactor]
+    explanation: str
+
+
+# Relationship Confirmation schemas
+class RelationshipConfirmRequest(BaseSchema):
+    pass
+
+
+class RelationshipDismissRequest(BaseSchema):
+    pass

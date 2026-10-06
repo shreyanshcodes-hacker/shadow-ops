@@ -18,7 +18,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/Tabs';
 import { Progress } from '@/components/ui/Progress';
 import { useWorkspace } from '@/hooks/useWorkspace';
 import { useParams, useRouter } from 'next/navigation';
-import { api, type Scan, type ScanEvent, type ScanSummary, type Finding, type FindingAiAnalysis, type AiRun, type AiAnalysisStatus, type SupportingEvidenceRef } from '@/lib/api';
+import { api, type Scan, type ScanEvent, type ScanSummary, type Finding, type FindingAiAnalysis, type AiRun, type AiAnalysisStatus, type SupportingEvidenceRef, type FindingRelationship, type AttackPath } from '@/lib/api';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { clsx } from 'clsx';
 import Link from 'next/link';
@@ -55,6 +55,23 @@ const CERTAINTY_CONFIG: Record<string, { label: string; color: string; bg: strin
   observed: { label: 'Observed', color: 'text-status-success', bg: 'bg-status-success/10', icon: CheckCircle },
   inferred: { label: 'Inferred', color: 'text-status-warning', bg: 'bg-status-warning/10', icon: AlertTriangle },
   uncertain: { label: 'Uncertain', color: 'text-foreground-muted', bg: 'bg-background-tertiary', icon: AlertCircleIcon },
+};
+
+const RELATIONSHIP_TYPE_LABELS: Record<string, string> = {
+  depends_on: 'Depends On',
+  enables: 'Enables',
+  exposes: 'Exposes',
+  leads_to: 'Leads To',
+  shares_component: 'Shares Component',
+  shares_entry_point: 'Shares Entry Point',
+  shares_data_flow: 'Shares Data Flow',
+  amplifies: 'Amplifies',
+};
+
+const SOURCE_CONFIG: Record<string, { label: string; color: string; bg: string }> = {
+  deterministic: { label: 'Deterministic', color: 'text-status-success', bg: 'bg-status-success/10' },
+  ai_suggested: { label: 'AI Suggested', color: 'text-accent-DEFAULT', bg: 'bg-accent-DEFAULT/10' },
+  human_confirmed: { label: 'Human Confirmed', color: 'text-status-info', bg: 'bg-status-info/10' },
 };
 
 const SEVERITY_ORDER = ['critical', 'high', 'medium', 'low', 'info'];
@@ -655,6 +672,20 @@ export default function FindingDetailPage() {
     staleTime: 30 * 1000,
   });
 
+  const { data: relationships } = useQuery({
+    queryKey: ['finding-relationships', findingId],
+    queryFn: () => api.listFindingRelationships(findingId),
+    enabled: !!findingId,
+    staleTime: 30 * 1000,
+  });
+
+  const { data: findingAttackPaths } = useQuery({
+    queryKey: ['finding-attack-paths', findingId],
+    queryFn: () => api.getFindingAttackPaths(findingId),
+    enabled: !!findingId,
+    staleTime: 30 * 1000,
+  });
+
   const analyzeMutation = useMutation({
     mutationFn: (findingId: string) => api.startFindingAnalysisDirect(findingId),
     onSuccess: () => {
@@ -721,6 +752,92 @@ export default function FindingDetailPage() {
             onReanalyze={onReanalyze}
           />
 
+          {/* Security Relationships */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <GitBranch className="h-5 w-5 text-accent-DEFAULT" />
+                Security Relationships
+              </CardTitle>
+              <CardDescription>
+                Relationships to other findings (deterministic, AI-suggested, or human-confirmed).
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {(relationships && relationships.length > 0) || (findingAttackPaths && findingAttackPaths.length > 0) ? (
+                <div className="space-y-4">
+                  {relationships && relationships.length > 0 && (
+                    <div className="space-y-3">
+                      <h4 className="text-sm font-medium text-foreground-DEFAULT">Related Findings ({relationships.length})</h4>
+                      <div className="space-y-2">
+                        {relationships.map((rel, idx) => {
+                          const isSource = rel.source_finding_id === finding.id;
+                          const otherFinding = isSource ? rel.target_finding : rel.source_finding;
+                          const direction = isSource ? '→' : '←';
+                          const typeLabel = RELATIONSHIP_TYPE_LABELS[rel.relationship_type] || rel.relationship_type;
+                          const sourceConfig = SOURCE_CONFIG[rel.source] || SOURCE_CONFIG.deterministic;
+                          
+                          return (
+                            <Link key={idx} href={`/findings/${otherFinding?.id}`} className="flex items-center gap-3 p-3 rounded-lg border border-border-DEFAULT hover:bg-background-tertiary/50 transition-colors">
+                              <div className={clsx('flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center', sourceConfig.bg)}>
+                                <span className={clsx('text-xs font-mono', sourceConfig.color)}>{direction}</span>
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-2">
+                                  <span className="font-medium text-foreground-DEFAULT truncate">{otherFinding?.title || 'Unknown Finding'}</span>
+                                  <Badge variant="outline" className="text-xs">{typeLabel}</Badge>
+                                  <Badge variant="outline" className={clsx('text-xs', sourceConfig.color, sourceConfig.bg)}>
+                                    {sourceConfig.label}
+                                  </Badge>
+                                </div>
+                                <p className="text-xs text-foreground-muted truncate">{rel.rationale}</p>
+                              </div>
+                              <ConfidenceBar confidence={rel.confidence} />
+                            </Link>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  {findingAttackPaths && findingAttackPaths.length > 0 && (
+                    <div className="space-y-3 pt-4 border-t border-border-DEFAULT">
+                      <h4 className="text-sm font-medium text-foreground-DEFAULT">Attack Paths ({findingAttackPaths.length})</h4>
+                      <div className="space-y-2">
+                        {findingAttackPaths.map((path, idx) => {
+                          const riskConfig = RISK_BAND_CONFIG[path.risk_band || 'informational'];
+                          return (
+                            <Link key={idx} href={`/attack-paths/${path.id}`} className="flex items-center gap-3 p-3 rounded-lg border border-border-DEFAULT hover:bg-background-tertiary/50 transition-colors">
+                              <div className="flex-shrink-0 w-10 h-10 rounded-full bg-accent-DEFAULT/10 flex items-center justify-center">
+                                <GitBranch className="h-5 w-5 text-accent-DEFAULT" />
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <p className="font-medium text-foreground-DEFAULT truncate">{path.title}</p>
+                                <div className="flex items-center gap-2 text-xs text-foreground-muted mt-1">
+                                  <Badge variant="outline" className={clsx(riskConfig.color, riskConfig.bg)}>
+                                    {riskConfig.label}
+                                  </Badge>
+                                  <span>{path.node_count} nodes</span>
+                                  {path.risk_score !== null && <span>Score: {path.risk_score}</span>}
+                                </div>
+                              </div>
+                            </Link>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="text-center py-8">
+                  <GitBranch className="h-10 w-10 mx-auto mb-2 text-foreground-muted/50" />
+                  <p className="text-foreground-muted">No relationships or attack paths found</p>
+                  <p className="text-sm text-foreground-muted mt-1">Run correlation to discover relationships</p>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
           {/* Evidence */}
           <FindingEvidenceSection evidenceList={evidenceList || []} />
         </div>
@@ -783,6 +900,28 @@ export default function FindingDetailPage() {
               </div>
             </CardContent>
           </Card>
+
+          {/* Correlation Actions */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Zap className="h-5 w-5 text-accent-DEFAULT" />
+                Correlation Actions
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <Button
+                variant="outline"
+                className="w-full gap-2"
+                onClick={() => api.correlateFinding(findingId)}
+              >
+                <GitBranch className="h-4 w-4" />
+                Run Deterministic Correlation
+              </Button>
+              <p className="text-xs text-foreground-muted text-center">
+                Finds relationships based on shared files, components, CWE/OWASP categories
+              </p>
+            </CardContent          </Card>
 
           {/* AI Analysis History */}
           {aiAnalyses && aiAnalyses.length > 1 && (

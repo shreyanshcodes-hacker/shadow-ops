@@ -302,6 +302,73 @@ class ApiClient {
     return this.get(`/ai/scans/${scanId}/ai-analysis-status`);
   }
 
+  // Attack Paths & Correlation
+  async listFindingRelationships(findingId: string): Promise<FindingRelationship[]> {
+    return this.get(`/attack-paths/findings/${findingId}/relationships`);
+  }
+
+  async confirmRelationship(relationshipId: string): Promise<FindingRelationship> {
+    return this.post(`/attack-paths/relationships/${relationshipId}/confirm`, {});
+  }
+
+  async dismissRelationship(relationshipId: string): Promise<FindingRelationship> {
+    return this.post(`/attack-paths/relationships/${relationshipId}/dismiss`, {});
+  }
+
+  async listAttackPaths(workspaceId: string, params?: Record<string, string>): Promise<AttackPath[]> {
+    const query = params ? `?${new URLSearchParams(params).toString()}` : '';
+    return this.get(`/attack-paths${query}`);
+  }
+
+  async createAttackPath(workspaceId: string, data: CreateAttackPathRequest): Promise<AttackPath> {
+    return this.post(`/attack-paths`, { ...data, workspace_id: workspaceId });
+  }
+
+  async getAttackPath(attackPathId: string): Promise<AttackPath> {
+    return this.get(`/attack-paths/${attackPathId}`);
+  }
+
+  async updateAttackPath(attackPathId: string, data: UpdateAttackPathRequest): Promise<AttackPath> {
+    return this.patch(`/attack-paths/${attackPathId}`, data);
+  }
+
+  async getAttackPathNodes(attackPathId: string): Promise<AttackPathNode[]> {
+    return this.get(`/attack-paths/${attackPathId}/nodes`);
+  }
+
+  async getAttackPathEdges(attackPathId: string): Promise<AttackPathEdge[]> {
+    return this.get(`/attack-paths/${attackPathId}/edges`);
+  }
+
+  async recalculateRisk(attackPathId: string): Promise<RiskCalculationResult> {
+    return this.post(`/attack-paths/${attackPathId}/recalculate-risk`, {});
+  }
+
+  async getRiskHistory(attackPathId: string): Promise<RiskSnapshot[]> {
+    return this.get(`/attack-paths/${attackPathId}/risk-history`);
+  }
+
+  async correlateFinding(findingId: string): Promise<FindingRelationship[]> {
+    return this.post(`/attack-paths/correlate/${findingId}`, {});
+  }
+
+  async correlateWorkspace(workspaceId: string): Promise<FindingRelationship[]> {
+    return this.post(`/attack-paths/correlate/workspace/${workspaceId}`, {});
+  }
+
+  async aiCorrelateFindings(findingAId: string, findingBId: string): Promise<FindingRelationship> {
+    return this.post(`/attack-paths/correlate/ai/${findingAId}/${findingBId}`, {});
+  }
+
+  async generateAttackPaths(assetId: string, params?: Record<string, string>): Promise<AttackPath[]> {
+    const query = params ? `?${new URLSearchParams(params).toString()}` : '';
+    return this.post(`/attack-paths/generate/${assetId}${query}`, {});
+  }
+
+  async getFindingAttackPaths(findingId: string): Promise<AttackPath[]> {
+    return this.get(`/attack-paths/findings/${findingId}/attack-paths`);
+  }
+
   // Remediation
   async listRemediations(workspaceId: string): Promise<RemediationProposal[]> {
     return this.get(`/workspaces/${workspaceId}/remediations`);
@@ -731,4 +798,146 @@ export interface AiAnalysisStatus {
   ai_run_id: string | null;
   status: string | null;
   error: string | null;
+}
+
+// Attack Path & Correlation Types
+export type RelationshipType = 
+  | 'depends_on' 
+  | 'enables' 
+  | 'exposes' 
+  | 'leads_to' 
+  | 'shares_component' 
+  | 'shares_entry_point' 
+  | 'shares_data_flow' 
+  | 'amplifies';
+
+export type RelationshipSource = 
+  | 'deterministic' 
+  | 'ai_suggested' 
+  | 'human_confirmed';
+
+export type AttackPathStatus = 'draft' | 'active' | 'dismissed' | 'resolved';
+
+export type AttackPathNodeType = 'entry' | 'finding' | 'boundary' | 'impact';
+
+export type RiskBand = 'informational' | 'low' | 'medium' | 'high' | 'critical';
+
+export interface FindingRelationship {
+  id: string;
+  workspace_id: string;
+  source_finding_id: string;
+  target_finding_id: string;
+  relationship_type: RelationshipType;
+  confidence: number;
+  source: RelationshipSource;
+  rationale: string;
+  evidence_reference: string | null;
+  created_at: string;
+  updated_at: string;
+  source_finding?: Finding;
+  target_finding?: Finding;
+}
+
+export interface CreateAttackPathRequest {
+  asset_id: string;
+  title: string;
+  description?: string;
+  status?: AttackPathStatus;
+  confidence?: number;
+  severity?: string;
+}
+
+export interface UpdateAttackPathRequest {
+  title?: string;
+  description?: string;
+  status?: AttackPathStatus;
+  confidence?: number;
+  severity?: string;
+}
+
+export interface AttackPathNode {
+  id: string;
+  attack_path_id: string;
+  finding_id: string | null;
+  sequence: number;
+  node_type: AttackPathNodeType;
+  rationale: string;
+  created_at: string;
+  updated_at: string;
+  finding?: Finding;
+}
+
+export interface AttackPathEdge {
+  id: string;
+  attack_path_id: string;
+  source_node_id: string;
+  target_node_id: string;
+  relationship_type: RelationshipType;
+  confidence: number;
+  source: RelationshipSource;
+  rationale: string;
+  created_at: string;
+  source_node?: AttackPathNode;
+  target_node?: AttackPathNode;
+}
+
+export interface AttackPath {
+  id: string;
+  workspace_id: string;
+  asset_id: string;
+  title: string;
+  description: string;
+  status: AttackPathStatus;
+  confidence: number;
+  severity: string;
+  risk_score: number | null;
+  risk_band: RiskBand | null;
+  risk_model_version: string;
+  created_at: string;
+  updated_at: string;
+  nodes: AttackPathNode[];
+  edges: AttackPathEdge[];
+  asset?: Asset;
+}
+
+export interface AttackPathListItem {
+  id: string;
+  workspace_id: string;
+  asset_id: string;
+  title: string;
+  status: AttackPathStatus;
+  confidence: number;
+  severity: string;
+  risk_score: number | null;
+  risk_band: RiskBand | null;
+  node_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface RiskFactor {
+  name: string;
+  weight: number;
+  value: number;
+  contribution: number;
+  description: string;
+}
+
+export interface RiskCalculationResult {
+  score: number;
+  risk_band: RiskBand;
+  model_version: string;
+  factors: RiskFactor[];
+  explanation: string;
+}
+
+export interface RiskSnapshot {
+  id: string;
+  workspace_id: string;
+  attack_path_id: string;
+  score: number;
+  risk_band: RiskBand;
+  model_version: string;
+  factors: Record<string, unknown>;
+  calculated_at: string;
 }

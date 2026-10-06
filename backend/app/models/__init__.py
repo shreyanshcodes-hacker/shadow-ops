@@ -598,3 +598,180 @@ class FindingAiAnalysis(Base):
 
     def __repr__(self) -> str:
         return f"<FindingAiAnalysis(finding_id={self.finding_id}, confidence={self.confidence})>"
+
+
+class RelationshipSource(str, enum.Enum):
+    DETERMINISTIC = "deterministic"
+    AI_SUGGESTED = "ai_suggested"
+    HUMAN_CONFIRMED = "human_confirmed"
+
+
+class RelationshipType(str, enum.Enum):
+    DEPENDS_ON = "depends_on"
+    ENABLES = "enables"
+    EXPOSES = "exposes"
+    LEADS_TO = "leads_to"
+    SHARES_COMPONENT = "shares_component"
+    SHARES_ENTRY_POINT = "shares_entry_point"
+    SHARES_DATA_FLOW = "shares_data_flow"
+    AMPLIFIES = "amplifies"
+
+
+class FindingRelationship(Base):
+    __tablename__ = "finding_relationships"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False, index=True)
+    source_finding_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("findings.id", ondelete="CASCADE"), nullable=False, index=True)
+    target_finding_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("findings.id", ondelete="CASCADE"), nullable=False, index=True)
+    relationship_type: Mapped[RelationshipType] = mapped_column(SQLEnum(RelationshipType), nullable=False, index=True)
+    confidence: Mapped[float] = mapped_column(nullable=False)
+    source: Mapped[RelationshipSource] = mapped_column(SQLEnum(RelationshipSource), nullable=False, default=RelationshipSource.DETERMINISTIC, index=True)
+    rationale: Mapped[str] = mapped_column(Text, nullable=False)
+    evidence_reference: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    # Relationships
+    workspace: Mapped["Workspace"] = relationship("Workspace")
+    source_finding: Mapped["Finding"] = relationship("Finding", foreign_keys=[source_finding_id])
+    target_finding: Mapped["Finding"] = relationship("Finding", foreign_keys=[target_finding_id])
+
+    __table_args__ = (
+        Index("idx_finding_rel_ws_id", "workspace_id"),
+        Index("idx_finding_rel_source", "source_finding_id"),
+        Index("idx_finding_rel_target", "target_finding_id"),
+        Index("idx_finding_rel_source_type", "source"),
+        UniqueConstraint("source_finding_id", "target_finding_id", "relationship_type", name="uq_finding_relationship"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<FindingRelationship({self.source_finding_id} -> {self.target_finding_id} [{self.relationship_type}])>"
+
+
+class AttackPathStatus(str, enum.Enum):
+    DRAFT = "draft"
+    ACTIVE = "active"
+    DISMISSED = "dismissed"
+    RESOLVED = "resolved"
+
+
+class AttackPath(Base):
+    __tablename__ = "attack_paths"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False, index=True)
+    asset_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("assets.id", ondelete="CASCADE"), nullable=False, index=True)
+    title: Mapped[str] = mapped_column(Text, nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    status: Mapped[AttackPathStatus] = mapped_column(SQLEnum(AttackPathStatus), default=AttackPathStatus.DRAFT, nullable=False, index=True)
+    confidence: Mapped[float] = mapped_column(nullable=False, default=0.0)
+    severity: Mapped[str] = mapped_column(Text, nullable=False, default="unknown")
+    risk_score: Mapped[Optional[int]] = mapped_column(nullable=True)
+    risk_model_version: Mapped[str] = mapped_column(Text, default="risk-v1", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    # Relationships
+    workspace: Mapped["Workspace"] = relationship("Workspace")
+    asset: Mapped["Asset"] = relationship("Asset")
+    nodes: Mapped[List["AttackPathNode"]] = relationship("AttackPathNode", back_populates="attack_path", cascade="all, delete-orphan", order_by="AttackPathNode.sequence")
+    edges: Mapped[List["AttackPathEdge"]] = relationship("AttackPathEdge", back_populates="attack_path", cascade="all, delete-orphan")
+    risk_snapshots: Mapped[List["RiskSnapshot"]] = relationship("RiskSnapshot", back_populates="attack_path", cascade="all, delete-orphan")
+
+    __table_args__ = (
+        Index("idx_attack_path_ws_id", "workspace_id"),
+        Index("idx_attack_path_asset_id", "asset_id"),
+        Index("idx_attack_path_status", "status"),
+        Index("idx_attack_path_risk_score", "risk_score"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<AttackPath(id={self.id}, title={self.title}, risk_score={self.risk_score})>"
+
+
+class AttackPathNodeType(str, enum.Enum):
+    ENTRY = "entry"
+    FINDING = "finding"
+    BOUNDARY = "boundary"
+    IMPACT = "impact"
+
+
+class AttackPathNode(Base):
+    __tablename__ = "attack_path_nodes"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    attack_path_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("attack_paths.id", ondelete="CASCADE"), nullable=False, index=True)
+    finding_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), ForeignKey("findings.id", ondelete="SET NULL"), nullable=True, index=True)
+    sequence: Mapped[int] = mapped_column(nullable=False)
+    node_type: Mapped[AttackPathNodeType] = mapped_column(SQLEnum(AttackPathNodeType), nullable=False)
+    rationale: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    # Relationships
+    attack_path: Mapped["AttackPath"] = relationship("AttackPath", back_populates="nodes")
+    finding: Mapped[Optional["Finding"]] = relationship("Finding")
+
+    __table_args__ = (
+        Index("idx_attack_path_node_path_id", "attack_path_id"),
+        Index("idx_attack_path_node_finding_id", "finding_id"),
+        UniqueConstraint("attack_path_id", "sequence", name="uq_attack_path_node_sequence"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<AttackPathNode(path={self.attack_path_id}, seq={self.sequence}, type={self.node_type})>"
+
+
+class AttackPathEdge(Base):
+    __tablename__ = "attack_path_edges"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    attack_path_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("attack_paths.id", ondelete="CASCADE"), nullable=False, index=True)
+    source_node_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("attack_path_nodes.id", ondelete="CASCADE"), nullable=False, index=True)
+    target_node_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("attack_path_nodes.id", ondelete="CASCADE"), nullable=False, index=True)
+    relationship_type: Mapped[RelationshipType] = mapped_column(SQLEnum(RelationshipType), nullable=False)
+    confidence: Mapped[float] = mapped_column(nullable=False)
+    source: Mapped[RelationshipSource] = mapped_column(SQLEnum(RelationshipSource), nullable=False)
+    rationale: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    # Relationships
+    attack_path: Mapped["AttackPath"] = relationship("AttackPath", back_populates="edges")
+    source_node: Mapped["AttackPathNode"] = relationship("AttackPathNode", foreign_keys=[source_node_id])
+    target_node: Mapped["AttackPathNode"] = relationship("AttackPathNode", foreign_keys=[target_node_id])
+
+    __table_args__ = (
+        Index("idx_attack_path_edge_path_id", "attack_path_id"),
+        Index("idx_attack_path_edge_source", "source_node_id"),
+        Index("idx_attack_path_edge_target", "target_node_id"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<AttackPathEdge({self.source_node_id} -> {self.target_node_id} [{self.relationship_type}])>"
+
+
+class RiskSnapshot(Base):
+    __tablename__ = "risk_snapshots"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False, index=True)
+    attack_path_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("attack_paths.id", ondelete="CASCADE"), nullable=False, index=True)
+    score: Mapped[int] = mapped_column(nullable=False)
+    risk_band: Mapped[str] = mapped_column(Text, nullable=False)
+    model_version: Mapped[str] = mapped_column(Text, nullable=False)
+    factors: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    calculated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    # Relationships
+    workspace: Mapped["Workspace"] = relationship("Workspace")
+    attack_path: Mapped["AttackPath"] = relationship("AttackPath", back_populates="risk_snapshots")
+
+    __table_args__ = (
+        Index("idx_risk_snapshot_ws_id", "workspace_id"),
+        Index("idx_risk_snapshot_path_id", "attack_path_id"),
+        Index("idx_risk_snapshot_calculated_at", "calculated_at"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<RiskSnapshot(path={self.attack_path_id}, score={self.score}, band={self.risk_band})>"

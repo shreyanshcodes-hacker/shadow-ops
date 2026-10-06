@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update, delete, func, and_, or_
 from sqlalchemy.orm import selectinload
 
-from app.models import Profile, Workspace, WorkspaceMember, Asset, AssetAuthorization, WorkspaceRole, AuthorizationStatus, Scan, ScanEvent, Finding, FindingEvidence, ScanTarget, ScanStatus, ScanProfile, ScanEventType, FindingSource, FindingSeverity, FindingConfidence, FindingStatus, FindingEvidenceType, AiRun, FindingAiAnalysis, AiProviderType, AiOperationType, AiRunStatus
+from app.models import Profile, Workspace, WorkspaceMember, Asset, AssetAuthorization, WorkspaceRole, AuthorizationStatus, Scan, ScanEvent, Finding, FindingEvidence, ScanTarget, ScanStatus, ScanProfile, ScanEventType, FindingSource, FindingSeverity, FindingConfidence, FindingStatus, FindingEvidenceType, AiRun, FindingAiAnalysis, AiProviderType, AiOperationType, AiRunStatus, FindingRelationship, RelationshipType, RelationshipSource, AttackPath, AttackPathStatus, AttackPathNode, AttackPathNodeType, AttackPathEdge, RiskSnapshot
 
 
 class ProfileRepository:
@@ -568,3 +568,225 @@ class FindingAiAnalysisRepository:
             select(FindingAiAnalysis).where(FindingAiAnalysis.workspace_id == workspace_id).order_by(FindingAiAnalysis.created_at.desc()).limit(limit).offset(offset)
         )
         return list(result.scalars().all())
+
+
+class FindingRelationshipRepository:
+    def __init__(self, db: AsyncSession):
+        self.db = db
+
+    async def create(self, relationship: FindingRelationship) -> FindingRelationship:
+        self.db.add(relationship)
+        await self.db.flush()
+        await self.db.refresh(relationship)
+        return relationship
+
+    async def get_by_id(self, relationship_id: UUID) -> Optional[FindingRelationship]:
+        result = await self.db.execute(select(FindingRelationship).where(FindingRelationship.id == relationship_id))
+        return result.scalar_one_or_none()
+
+    async def get_by_findings(self, source_finding_id: UUID, target_finding_id: UUID) -> List[FindingRelationship]:
+        result = await self.db.execute(
+            select(FindingRelationship).where(
+                FindingRelationship.source_finding_id == source_finding_id,
+                FindingRelationship.target_finding_id == target_finding_id,
+            )
+        )
+        return list(result.scalars().all())
+
+    async def get_by_source(self, source_finding_id: UUID) -> List[FindingRelationship]:
+        result = await self.db.execute(
+            select(FindingRelationship).where(FindingRelationship.source_finding_id == source_finding_id)
+        )
+        return list(result.scalars().all())
+
+    async def get_by_target(self, target_finding_id: UUID) -> List[FindingRelationship]:
+        result = await self.db.execute(
+            select(FindingRelationship).where(FindingRelationship.target_finding_id == target_finding_id)
+        )
+        return list(result.scalars().all())
+
+    async def get_by_workspace(self, workspace_id: UUID, source: Optional[RelationshipSource] = None, limit: int = 100, offset: int = 0) -> List[FindingRelationship]:
+        query = select(FindingRelationship).where(FindingRelationship.workspace_id == workspace_id).order_by(FindingRelationship.created_at.desc()).limit(limit).offset(offset)
+        if source:
+            query = query.where(FindingRelationship.source == source)
+        result = await self.db.execute(query)
+        return list(result.scalars().all())
+
+    async def get_by_finding(self, finding_id: UUID) -> List[FindingRelationship]:
+        result = await self.db.execute(
+            select(FindingRelationship).where(
+                or_(
+                    FindingRelationship.source_finding_id == finding_id,
+                    FindingRelationship.target_finding_id == finding_id,
+                )
+            )
+        )
+        return list(result.scalars().all())
+
+    async def update(self, relationship_id: UUID, data: Dict[str, Any]) -> Optional[FindingRelationship]:
+        result = await self.db.execute(
+            update(FindingRelationship).where(FindingRelationship.id == relationship_id).values(**data).returning(FindingRelationship)
+        )
+        return result.scalar_one_or_none()
+
+    async def delete(self, relationship_id: UUID) -> bool:
+        result = await self.db.execute(delete(FindingRelationship).where(FindingRelationship.id == relationship_id))
+        return result.rowcount > 0
+
+
+class AttackPathRepository:
+    def __init__(self, db: AsyncSession):
+        self.db = db
+
+    async def create(self, attack_path: AttackPath) -> AttackPath:
+        self.db.add(attack_path)
+        await self.db.flush()
+        await self.db.refresh(attack_path)
+        return attack_path
+
+    async def get_by_id(self, attack_path_id: UUID) -> Optional[AttackPath]:
+        result = await self.db.execute(
+            select(AttackPath)
+            .options(
+                selectinload(AttackPath.nodes).selectinload(AttackPathNode.finding),
+                selectinload(AttackPath.edges).selectinload(AttackPathEdge.source_node).selectinload(AttackPathNode.finding),
+                selectinload(AttackPath.edges).selectinload(AttackPathEdge.target_node).selectinload(AttackPathNode.finding),
+            )
+            .where(AttackPath.id == attack_path_id)
+        )
+        return result.scalar_one_or_none()
+
+    async def get_by_workspace(self, workspace_id: UUID, status: Optional[AttackPathStatus] = None, limit: int = 50, offset: int = 0) -> List[AttackPath]:
+        query = select(AttackPath).where(AttackPath.workspace_id == workspace_id).order_by(AttackPath.updated_at.desc()).limit(limit).offset(offset)
+        if status:
+            query = query.where(AttackPath.status == status)
+        result = await self.db.execute(query)
+        return list(result.scalars().all())
+
+    async def get_by_asset(self, asset_id: UUID, status: Optional[AttackPathStatus] = None) -> List[AttackPath]:
+        query = select(AttackPath).where(AttackPath.asset_id == asset_id).order_by(AttackPath.updated_at.desc())
+        if status:
+            query = query.where(AttackPath.status == status)
+        result = await self.db.execute(query)
+        return list(result.scalars().all())
+
+    async def update(self, attack_path_id: UUID, data: Dict[str, Any]) -> Optional[AttackPath]:
+        result = await self.db.execute(
+            update(AttackPath).where(AttackPath.id == attack_path_id).values(**data).returning(AttackPath)
+        )
+        return result.scalar_one_or_none()
+
+    async def delete(self, attack_path_id: UUID) -> bool:
+        result = await self.db.execute(delete(AttackPath).where(AttackPath.id == attack_path_id))
+        return result.rowcount > 0
+
+    async def count_by_workspace(self, workspace_id: UUID, status: Optional[AttackPathStatus] = None) -> int:
+        query = select(func.count(AttackPath.id)).where(AttackPath.workspace_id == workspace_id)
+        if status:
+            query = query.where(AttackPath.status == status)
+        result = await self.db.execute(query)
+        return result.scalar_one()
+
+
+class AttackPathNodeRepository:
+    def __init__(self, db: AsyncSession):
+        self.db = db
+
+    async def create(self, node: AttackPathNode) -> AttackPathNode:
+        self.db.add(node)
+        await self.db.flush()
+        await self.db.refresh(node)
+        return node
+
+    async def create_many(self, nodes: List[AttackPathNode]) -> List[AttackPathNode]:
+        for node in nodes:
+            self.db.add(node)
+        await self.db.flush()
+        for node in nodes:
+            await self.db.refresh(node)
+        return nodes
+
+    async def get_by_id(self, node_id: UUID) -> Optional[AttackPathNode]:
+        result = await self.db.execute(select(AttackPathNode).where(AttackPathNode.id == node_id))
+        return result.scalar_one_or_none()
+
+    async def get_by_attack_path(self, attack_path_id: UUID) -> List[AttackPathNode]:
+        result = await self.db.execute(
+            select(AttackPathNode)
+            .options(selectinload(AttackPathNode.finding))
+            .where(AttackPathNode.attack_path_id == attack_path_id)
+            .order_by(AttackPathNode.sequence)
+        )
+        return list(result.scalars().all())
+
+    async def get_by_finding(self, finding_id: UUID) -> List[AttackPathNode]:
+        result = await self.db.execute(
+            select(AttackPathNode).where(AttackPathNode.finding_id == finding_id)
+        )
+        return list(result.scalars().all())
+
+
+class AttackPathEdgeRepository:
+    def __init__(self, db: AsyncSession):
+        self.db = db
+
+    async def create(self, edge: AttackPathEdge) -> AttackPathEdge:
+        self.db.add(edge)
+        await self.db.flush()
+        await self.db.refresh(edge)
+        return edge
+
+    async def create_many(self, edges: List[AttackPathEdge]) -> List[AttackPathEdge]:
+        for edge in edges:
+            self.db.add(edge)
+        await self.db.flush()
+        for edge in edges:
+            await self.db.refresh(edge)
+        return edges
+
+    async def get_by_id(self, edge_id: UUID) -> Optional[AttackPathEdge]:
+        result = await self.db.execute(select(AttackPathEdge).where(AttackPathEdge.id == edge_id))
+        return result.scalar_one_or_none()
+
+    async def get_by_attack_path(self, attack_path_id: UUID) -> List[AttackPathEdge]:
+        result = await self.db.execute(
+            select(AttackPathEdge)
+            .options(
+                selectinload(AttackPathEdge.source_node).selectinload(AttackPathNode.finding),
+                selectinload(AttackPathEdge.target_node).selectinload(AttackPathNode.finding),
+            )
+            .where(AttackPathEdge.attack_path_id == attack_path_id)
+        )
+        return list(result.scalars().all())
+
+
+class RiskSnapshotRepository:
+    def __init__(self, db: AsyncSession):
+        self.db = db
+
+    async def create(self, snapshot: RiskSnapshot) -> RiskSnapshot:
+        self.db.add(snapshot)
+        await self.db.flush()
+        await self.db.refresh(snapshot)
+        return snapshot
+
+    async def get_by_id(self, snapshot_id: UUID) -> Optional[RiskSnapshot]:
+        result = await self.db.execute(select(RiskSnapshot).where(RiskSnapshot.id == snapshot_id))
+        return result.scalar_one_or_none()
+
+    async def get_by_attack_path(self, attack_path_id: UUID) -> List[RiskSnapshot]:
+        result = await self.db.execute(
+            select(RiskSnapshot)
+            .where(RiskSnapshot.attack_path_id == attack_path_id)
+            .order_by(RiskSnapshot.calculated_at.desc())
+        )
+        return list(result.scalars().all())
+
+    async def get_latest_by_attack_path(self, attack_path_id: UUID) -> Optional[RiskSnapshot]:
+        result = await self.db.execute(
+            select(RiskSnapshot)
+            .where(RiskSnapshot.attack_path_id == attack_path_id)
+            .order_by(RiskSnapshot.calculated_at.desc())
+            .limit(1)
+        )
+        return result.scalar_one_or_none()
