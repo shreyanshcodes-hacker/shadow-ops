@@ -19,8 +19,20 @@ from app.ai.providers import (
     initialize_providers,
 )
 
-from app.ai.providers.gemini import GeminiProvider
-from app.ai.providers.grok import GrokProvider
+# Lazy imports for provider classes
+def _get_gemini_provider():
+    from app.ai.providers.gemini import GeminiProvider
+    return GeminiProvider
+
+def _get_grok_provider():
+    from app.ai.providers.grok import GrokProvider
+    return GrokProvider
+
+# Only import base classes and functions, not the concrete provider classes
+# This avoids config validation at import time
+GeminiProvider = None  # type: ignore
+GrokProvider = None  # type: ignore
+
 from app.ai.manager import AIManager, AIManagerError
 from app.ai.schemas import (
     FindingAnalysis,
@@ -56,6 +68,18 @@ from app.ai.safety import (
     UNTRUSTED_EVIDENCE_START,
     UNTRUSTED_EVIDENCE_END,
 )
+from app.ai.team_schemas import (
+    AgentName, AgentStatus, SecurityTeamRunStatus,
+    AgentRequest, AgentResponse, EvidenceReference,
+    ReconAgentOutput, ReconAgentResponse,
+    VulnerabilityAnalystOutput, VulnerabilityAnalystResponse,
+    AttackPathAnalystOutput, AttackPathAnalystResponse,
+    RiskAnalystOutput, RiskAnalystResponse,
+    SecurityReviewerOutput, SecurityReviewerResponse,
+    TeamAssessment,
+    SecurityTeamRunRequest, SecurityTeamRunResponse,
+    AgentRunResponse, TeamAssessmentResponse, TeamReviewResponse,
+)
 
 __all__ = [
     # Providers
@@ -77,8 +101,6 @@ __all__ = [
     "get_active_provider",
     "is_provider_available",
     "initialize_providers",
-    "GeminiProvider",
-    "GrokProvider",
     # Manager
     "AIManager",
     "AIManagerError",
@@ -112,4 +134,27 @@ __all__ = [
     "TRUSTED_SYSTEM_END",
     "UNTRUSTED_EVIDENCE_START",
     "UNTRUSTED_EVIDENCE_END",
+    # Team Schemas
+    "AgentName",
+    "AgentStatus",
+    "SecurityTeamRunStatus",
+    "AgentRequest",
+    "AgentResponse",
+    "EvidenceReference",
+    "ReconAgentOutput",
+    "ReconAgentResponse",
+    "VulnerabilityAnalystOutput",
+    "VulnerabilityAnalystResponse",
+    "AttackPathAnalystOutput",
+    "AttackPathAnalystResponse",
+    "RiskAnalystOutput",
+    "RiskAnalystResponse",
+    "SecurityReviewerOutput",
+    "SecurityReviewerResponse",
+    "TeamAssessment",
+    "SecurityTeamRunRequest",
+    "SecurityTeamRunResponse",
+    "AgentRunResponse",
+    "TeamAssessmentResponse",
+    "TeamReviewResponse",
 ]

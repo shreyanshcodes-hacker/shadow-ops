@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update, delete, func, and_, or_
 from sqlalchemy.orm import selectinload
 
-from app.models import Profile, Workspace, WorkspaceMember, Asset, AssetAuthorization, WorkspaceRole, AuthorizationStatus, Scan, ScanEvent, Finding, FindingEvidence, ScanTarget, ScanStatus, ScanProfile, ScanEventType, FindingSource, FindingSeverity, FindingConfidence, FindingStatus, FindingEvidenceType, AiRun, FindingAiAnalysis, AiProviderType, AiOperationType, AiRunStatus, FindingRelationship, RelationshipType, RelationshipSource, AttackPath, AttackPathStatus, AttackPathNode, AttackPathNodeType, AttackPathEdge, RiskSnapshot
+from app.models import Profile, Workspace, WorkspaceMember, Asset, AssetAuthorization, WorkspaceRole, AuthorizationStatus, Scan, ScanEvent, Finding, FindingEvidence, ScanTarget, ScanStatus, ScanProfile, ScanEventType, FindingSource, FindingSeverity, FindingConfidence, FindingStatus, FindingEvidenceType, AiRun, FindingAiAnalysis, AiProviderType, AiOperationType, AiRunStatus, FindingRelationship, RelationshipType, RelationshipSource, AttackPath, AttackPathStatus, AttackPathNode, AttackPathNodeType, AttackPathEdge, RiskSnapshot, SecurityTeamRun, SecurityTeamRunStatus, AgentRun, AgentName, AgentRunStatus, TeamAssessment, TeamReview
 
 
 class ProfileRepository:
@@ -790,3 +790,153 @@ class RiskSnapshotRepository:
             .limit(1)
         )
         return result.scalar_one_or_none()
+
+
+class SecurityTeamRunRepository:
+    def __init__(self, db: AsyncSession):
+        self.db = db
+
+    async def create(self, team_run: SecurityTeamRun) -> SecurityTeamRun:
+        self.db.add(team_run)
+        await self.db.flush()
+        await self.db.refresh(team_run)
+        return team_run
+
+    async def get_by_id(self, team_run_id: UUID) -> Optional[SecurityTeamRun]:
+        result = await self.db.execute(
+            select(SecurityTeamRun)
+            .options(
+                selectinload(SecurityTeamRun.agent_runs),
+                selectinload(SecurityTeamRun.assessment),
+                selectinload(SecurityTeamRun.review),
+            )
+            .where(SecurityTeamRun.id == team_run_id)
+        )
+        return result.scalar_one_or_none()
+
+    async def get_by_workspace(self, workspace_id: UUID, status: Optional[SecurityTeamRunStatus] = None, limit: int = 50, offset: int = 0) -> List[SecurityTeamRun]:
+        query = select(SecurityTeamRun).where(SecurityTeamRun.workspace_id == workspace_id).order_by(SecurityTeamRun.created_at.desc()).limit(limit).offset(offset)
+        if status:
+            query = query.where(SecurityTeamRun.status == status)
+        result = await self.db.execute(query)
+        return list(result.scalars().all())
+
+    async def get_by_asset(self, asset_id: UUID, limit: int = 50, offset: int = 0) -> List[SecurityTeamRun]:
+        result = await self.db.execute(
+            select(SecurityTeamRun).where(SecurityTeamRun.asset_id == asset_id).order_by(SecurityTeamRun.created_at.desc()).limit(limit).offset(offset)
+        )
+        return list(result.scalars().all())
+
+    async def get_by_scan(self, scan_id: UUID) -> List[SecurityTeamRun]:
+        result = await self.db.execute(
+            select(SecurityTeamRun).where(SecurityTeamRun.scan_id == scan_id).order_by(SecurityTeamRun.created_at.desc())
+        )
+        return list(result.scalars().all())
+
+    async def get_active_by_workspace_asset_scan(self, workspace_id: UUID, asset_id: UUID, scan_id: UUID, orchestration_version: str) -> Optional[SecurityTeamRun]:
+        result = await self.db.execute(
+            select(SecurityTeamRun).where(
+                SecurityTeamRun.workspace_id == workspace_id,
+                SecurityTeamRun.asset_id == asset_id,
+                SecurityTeamRun.scan_id == scan_id,
+                SecurityTeamRun.orchestration_version == orchestration_version,
+                SecurityTeamRun.status.in_([SecurityTeamRunStatus.QUEUED, SecurityTeamRunStatus.RUNNING]),
+            )
+        )
+        return result.scalar_one_or_none()
+
+    async def update(self, team_run_id: UUID, data: Dict[str, Any]) -> Optional[SecurityTeamRun]:
+        result = await self.db.execute(
+            update(SecurityTeamRun).where(SecurityTeamRun.id == team_run_id).values(**data).returning(SecurityTeamRun)
+        )
+        return result.scalar_one_or_none()
+
+    async def count_by_workspace(self, workspace_id: UUID, status: Optional[SecurityTeamRunStatus] = None) -> int:
+        query = select(func.count(SecurityTeamRun.id)).where(SecurityTeamRun.workspace_id == workspace_id)
+        if status:
+            query = query.where(SecurityTeamRun.status == status)
+        result = await self.db.execute(query)
+        return result.scalar_one()
+
+
+class AgentRunRepository:
+    def __init__(self, db: AsyncSession):
+        self.db = db
+
+    async def create(self, agent_run: AgentRun) -> AgentRun:
+        self.db.add(agent_run)
+        await self.db.flush()
+        await self.db.refresh(agent_run)
+        return agent_run
+
+    async def get_by_id(self, agent_run_id: UUID) -> Optional[AgentRun]:
+        result = await self.db.execute(select(AgentRun).where(AgentRun.id == agent_run_id))
+        return result.scalar_one_or_none()
+
+    async def get_by_team_run(self, team_run_id: UUID) -> List[AgentRun]:
+        result = await self.db.execute(
+            select(AgentRun).where(AgentRun.team_run_id == team_run_id).order_by(AgentRun.created_at.asc())
+        )
+        return list(result.scalars().all())
+
+    async def get_by_team_run_and_agent(self, team_run_id: UUID, agent_name: AgentName) -> Optional[AgentRun]:
+        result = await self.db.execute(
+            select(AgentRun).where(AgentRun.team_run_id == team_run_id, AgentRun.agent_name == agent_name)
+        )
+        return result.scalar_one_or_none()
+
+    async def update(self, agent_run_id: UUID, data: Dict[str, Any]) -> Optional[AgentRun]:
+        result = await self.db.execute(
+            update(AgentRun).where(AgentRun.id == agent_run_id).values(**data).returning(AgentRun)
+        )
+        return result.scalar_one_or_none()
+
+
+class TeamAssessmentRepository:
+    def __init__(self, db: AsyncSession):
+        self.db = db
+
+    async def create(self, assessment: TeamAssessment) -> TeamAssessment:
+        self.db.add(assessment)
+        await self.db.flush()
+        await self.db.refresh(assessment)
+        return assessment
+
+    async def get_by_id(self, assessment_id: UUID) -> Optional[TeamAssessment]:
+        result = await self.db.execute(select(TeamAssessment).where(TeamAssessment.id == assessment_id))
+        return result.scalar_one_or_none()
+
+    async def get_by_team_run(self, team_run_id: UUID) -> Optional[TeamAssessment]:
+        result = await self.db.execute(select(TeamAssessment).where(TeamAssessment.team_run_id == team_run_id))
+        return result.scalar_one_or_none()
+
+    async def update(self, assessment_id: UUID, data: Dict[str, Any]) -> Optional[TeamAssessment]:
+        result = await self.db.execute(
+            update(TeamAssessment).where(TeamAssessment.id == assessment_id).values(**data).returning(TeamAssessment)
+        )
+        return result.scalar_one_or_none()
+
+
+class TeamReviewRepository:
+    def __init__(self, db: AsyncSession):
+        self.db = db
+
+    async def create(self, review: TeamReview) -> TeamReview:
+        self.db.add(review)
+        await self.db.flush()
+        await self.db.refresh(review)
+        return review
+
+    async def get_by_id(self, review_id: UUID) -> Optional[TeamReview]:
+        result = await self.db.execute(select(TeamReview).where(TeamReview.id == review_id))
+        return result.scalar_one_or_none()
+
+    async def get_by_team_run(self, team_run_id: UUID) -> Optional[TeamReview]:
+        result = await self.db.execute(select(TeamReview).where(TeamReview.team_run_id == team_run_id))
+        return result.scalar_one_or_none()
+
+    async def get_by_workspace(self, workspace_id: UUID, limit: int = 50, offset: int = 0) -> List[TeamReview]:
+        result = await self.db.execute(
+            select(TeamReview).where(TeamReview.workspace_id == workspace_id).order_by(TeamReview.reviewed_at.desc()).limit(limit).offset(offset)
+        )
+        return list(result.scalars().all())

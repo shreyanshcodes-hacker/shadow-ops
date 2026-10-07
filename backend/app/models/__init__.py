@@ -775,3 +775,160 @@ class RiskSnapshot(Base):
 
     def __repr__(self) -> str:
         return f"<RiskSnapshot(path={self.attack_path_id}, score={self.score}, band={self.risk_band})>"
+
+
+class SecurityTeamRunStatus(str, enum.Enum):
+    QUEUED = "queued"
+    RUNNING = "running"
+    PARTIAL = "partial"
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+    CANCELED = "canceled"
+
+
+class AgentName(str, enum.Enum):
+    RECON = "recon"
+    VULNERABILITY_ANALYST = "vulnerability_analyst"
+    ATTACK_PATH_ANALYST = "attack_path_analyst"
+    RISK_ANALYST = "risk_analyst"
+    SECURITY_REVIEWER = "security_reviewer"
+
+
+class AgentRunStatus(str, enum.Enum):
+    QUEUED = "queued"
+    RUNNING = "running"
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+    BLOCKED = "blocked"
+    CANCELED = "canceled"
+
+
+class SecurityTeamRun(Base):
+    __tablename__ = "security_team_runs"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False, index=True)
+    asset_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("assets.id", ondelete="CASCADE"), nullable=False, index=True)
+    scan_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("scans.id", ondelete="CASCADE"), nullable=False, index=True)
+    status: Mapped[SecurityTeamRunStatus] = mapped_column(SQLEnum(SecurityTeamRunStatus), default=SecurityTeamRunStatus.QUEUED, nullable=False, index=True)
+    requested_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("profiles.id", ondelete="RESTRICT"), nullable=False)
+    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    orchestration_version: Mapped[str] = mapped_column(Text, default="security-team-v1", nullable=False)
+    team_summary: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
+    confidence: Mapped[Optional[float]] = mapped_column(nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    # Relationships
+    workspace: Mapped["Workspace"] = relationship("Workspace")
+    asset: Mapped["Asset"] = relationship("Asset")
+    scan: Mapped["Scan"] = relationship("Scan")
+    requester: Mapped["Profile"] = relationship("Profile", foreign_keys=[requested_by])
+    agent_runs: Mapped[List["AgentRun"]] = relationship("AgentRun", back_populates="team_run", cascade="all, delete-orphan")
+    assessment: Mapped[Optional["TeamAssessment"]] = relationship("TeamAssessment", back_populates="team_run", uselist=False, cascade="all, delete-orphan")
+    review: Mapped[Optional["TeamReview"]] = relationship("TeamReview", back_populates="team_run", uselist=False, cascade="all, delete-orphan")
+
+    __table_args__ = (
+        Index("idx_security_team_runs_ws_id", "workspace_id"),
+        Index("idx_security_team_runs_asset_id", "asset_id"),
+        Index("idx_security_team_runs_scan_id", "scan_id"),
+        Index("idx_security_team_runs_status", "status"),
+        Index("idx_security_team_runs_requested_by", "requested_by"),
+        Index("idx_security_team_runs_created_at", "created_at"),
+        UniqueConstraint("workspace_id", "asset_id", "scan_id", "orchestration_version", name="uq_security_team_run_active", postgresql_where=status.in_([SecurityTeamRunStatus.QUEUED, SecurityTeamRunStatus.RUNNING])),
+    )
+
+    def __repr__(self) -> str:
+        return f"<SecurityTeamRun(id={self.id}, asset_id={self.asset_id}, status={self.status}, version={self.orchestration_version})>"
+
+
+class AgentRun(Base):
+    __tablename__ = "agent_runs"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    team_run_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("security_team_runs.id", ondelete="CASCADE"), nullable=False, index=True)
+    agent_name: Mapped[AgentName] = mapped_column(SQLEnum(AgentName), nullable=False, index=True)
+    status: Mapped[AgentRunStatus] = mapped_column(SQLEnum(AgentRunStatus), default=AgentRunStatus.QUEUED, nullable=False, index=True)
+    input_reference: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
+    output: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
+    confidence: Mapped[Optional[float]] = mapped_column(nullable=True)
+    provider: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    model: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    prompt_version: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    error_code: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    attempt: Mapped[int] = mapped_column(default=0, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    # Relationships
+    team_run: Mapped["SecurityTeamRun"] = relationship("SecurityTeamRun", back_populates="agent_runs")
+
+    __table_args__ = (
+        Index("idx_agent_runs_team_run_id", "team_run_id"),
+        Index("idx_agent_runs_agent_name", "agent_name"),
+        Index("idx_agent_runs_status", "status"),
+        UniqueConstraint("team_run_id", "agent_name", name="uq_agent_run_team_agent"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<AgentRun(team_run={self.team_run_id}, agent={self.agent_name}, status={self.status})>"
+
+
+class TeamAssessment(Base):
+    __tablename__ = "team_assessments"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    team_run_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("security_team_runs.id", ondelete="CASCADE"), nullable=False, unique=True, index=True)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False, index=True)
+    executive_summary: Mapped[str] = mapped_column(Text, nullable=False)
+    key_findings: Mapped[list] = mapped_column(JSONB, default=list, nullable=False)
+    key_attack_paths: Mapped[list] = mapped_column(JSONB, default=list, nullable=False)
+    risk_interpretation: Mapped[str] = mapped_column(Text, nullable=False)
+    uncertainties: Mapped[list] = mapped_column(JSONB, default=list, nullable=False)
+    conflicting_assessments: Mapped[list] = mapped_column(JSONB, default=list, nullable=False)
+    recommended_human_actions: Mapped[list] = mapped_column(JSONB, default=list, nullable=False)
+    overall_confidence: Mapped[float] = mapped_column(nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    # Relationships
+    team_run: Mapped["SecurityTeamRun"] = relationship("SecurityTeamRun", back_populates="assessment")
+    workspace: Mapped["Workspace"] = relationship("Workspace")
+
+    __table_args__ = (
+        Index("idx_team_assessments_ws_id", "workspace_id"),
+        Index("idx_team_assessments_team_run_id", "team_run_id", unique=True),
+    )
+
+    def __repr__(self) -> str:
+        return f"<TeamAssessment(team_run={self.team_run_id}, confidence={self.overall_confidence})>"
+
+
+class TeamReview(Base):
+    __tablename__ = "team_reviews"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    team_run_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("security_team_runs.id", ondelete="CASCADE"), nullable=False, unique=True, index=True)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False, index=True)
+    reviewed_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("profiles.id", ondelete="RESTRICT"), nullable=False)
+    reviewed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    # Relationships
+    team_run: Mapped["SecurityTeamRun"] = relationship("SecurityTeamRun", back_populates="review")
+    workspace: Mapped["Workspace"] = relationship("Workspace")
+    reviewer: Mapped["Profile"] = relationship("Profile", foreign_keys=[reviewed_by])
+
+    __table_args__ = (
+        Index("idx_team_reviews_ws_id", "workspace_id"),
+        Index("idx_team_reviews_team_run_id", "team_run_id", unique=True),
+        Index("idx_team_reviews_reviewed_by", "reviewed_by"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<TeamReview(team_run={self.team_run_id}, reviewed_by={self.reviewed_by})>"

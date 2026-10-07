@@ -8,9 +8,10 @@ import { Sidebar, SidebarItem } from '@/components/ui/Sidebar';
 
 const navigation: SidebarItem[] = [
   { label: 'Dashboard', href: '/dashboard', icon: 'LayoutDashboard' },
-  { label: 'Scans', href: '/scans', icon: 'Search', disabled: true, badge: 'Soon' },
-  { label: 'Findings', href: '/findings', icon: 'AlertTriangle', disabled: true, badge: 'Soon' },
-  { label: 'Attack Paths', href: '/attack-paths', icon: 'GitBranch', disabled: true, badge: 'Soon' },
+  { label: 'Scans', href: '/scans', icon: 'Search' },
+  { label: 'Findings', href: '/findings', icon: 'AlertTriangle' },
+  { label: 'Attack Paths', href: '/attack-paths', icon: 'GitBranch' },
+  { label: 'Security Team', href: '/security-team', icon: 'Bot' },
   { label: 'Agents', href: '/agents', icon: 'Bot', disabled: true, badge: 'Soon' },
   { label: 'Remediation', href: '/remediation', icon: 'Wrench', disabled: true, badge: 'Soon' },
   { label: 'Reports', href: '/reports', icon: 'FileText', disabled: true, badge: 'Soon' },

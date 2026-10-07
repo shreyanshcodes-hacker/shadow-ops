@@ -369,6 +369,36 @@ class ApiClient {
     return this.get(`/attack-paths/findings/${findingId}/attack-paths`);
   }
 
+  // Security Team
+  async createSecurityTeamRun(data: { asset_id: string; scan_id: string; analysis_mode?: string }): Promise<SecurityTeamRunResponse> {
+    return this.post('/security-team/runs', data);
+  }
+
+  async listSecurityTeamRuns(workspaceId: string, params?: Record<string, string>): Promise<SecurityTeamRunListResponse[]> {
+    const query = params ? `?${new URLSearchParams(params).toString()}` : '';
+    return this.get(`/security-team/runs${query}`);
+  }
+
+  async getSecurityTeamRun(runId: string): Promise<SecurityTeamRunResponse> {
+    return this.get(`/security-team/runs/${runId}`);
+  }
+
+  async getSecurityTeamRunAgents(runId: string): Promise<SecurityTeamAgentRunResponse[]> {
+    return this.get(`/security-team/runs/${runId}/agents`);
+  }
+
+  async getSecurityTeamAssessment(runId: string): Promise<SecurityTeamAssessmentResponse> {
+    return this.get(`/security-team/runs/${runId}/assessment`);
+  }
+
+  async submitSecurityTeamReview(runId: string, notes?: string): Promise<SecurityTeamReviewResponse> {
+    return this.post(`/security-team/runs/${runId}/review`, { notes });
+  }
+
+  async cancelSecurityTeamRun(runId: string): Promise<void> {
+    return this.post(`/security-team/runs/${runId}/cancel`, {});
+  }
+
   // Remediation
   async listRemediations(workspaceId: string): Promise<RemediationProposal[]> {
     return this.get(`/workspaces/${workspaceId}/remediations`);
@@ -940,4 +970,115 @@ export interface RiskSnapshot {
   model_version: string;
   factors: Record<string, unknown>;
   calculated_at: string;
+}
+
+// Security Team Types
+export type SecurityTeamRunStatus = 'queued' | 'running' | 'partial' | 'succeeded' | 'failed' | 'canceled';
+
+export type AgentRunStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'blocked' | 'canceled';
+
+export type AgentName = 'recon' | 'vulnerability_analyst' | 'attack_path_analyst' | 'risk_analyst' | 'security_reviewer';
+
+export interface SecurityTeamRunCreateRequest {
+  asset_id: string;
+  scan_id: string;
+  analysis_mode?: string;
+}
+
+export interface SecurityTeamRunResponse {
+  id: string;
+  workspace_id: string;
+  asset_id: string;
+  scan_id: string;
+  status: SecurityTeamRunStatus;
+  requested_by: string;
+  started_at: string | null;
+  completed_at: string | null;
+  orchestration_version: string;
+  team_summary: Record<string, unknown>;
+  confidence: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SecurityTeamRunListResponse {
+  id: string;
+  workspace_id: string;
+  asset_id: string;
+  scan_id: string;
+  status: SecurityTeamRunStatus;
+  requested_by: string;
+  started_at: string | null;
+  completed_at: string | null;
+  orchestration_version: string;
+  team_summary: Record<string, unknown>;
+  confidence: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SecurityTeamAgentRunResponse {
+  id: string;
+  team_run_id: string;
+  agent_name: AgentName;
+  status: AgentRunStatus;
+  input_reference: Record<string, unknown>;
+  output: Record<string, unknown>;
+  confidence: number | null;
+  provider: string | null;
+  model: string | null;
+  prompt_version: string | null;
+  started_at: string | null;
+  completed_at: string | null;
+  error_code: string | null;
+  error_message: string | null;
+  attempt: number;
+  created_at: string;
+}
+
+export interface SecurityTeamAssessmentResponse {
+  id: string;
+  team_run_id: string;
+  workspace_id: string;
+  executive_summary: string;
+  key_findings: Array<{
+    finding_id: string;
+    title: string;
+    severity: string;
+    ai_confidence: number;
+    reason: string;
+  }>;
+  key_attack_paths: Array<{
+    attack_path_id: string;
+    title: string;
+    risk_score: number;
+    risk_band: string;
+    reason: string;
+  }>;
+  risk_interpretation: string;
+  uncertainties: string[];
+  conflicting_assessments: Array<{
+    agent_a: string;
+    agent_b: string;
+    finding_or_path_id: string;
+    agent_a_confidence: number;
+    agent_b_confidence: number;
+    description: string;
+  }>;
+  recommended_human_actions: string[];
+  overall_confidence: number;
+  deterministic_risk_score_referenced: number | null;
+  human_review_required: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SecurityTeamReviewResponse {
+  id: string;
+  team_run_id: string;
+  workspace_id: string;
+  reviewed_by: string;
+  reviewed_at: string;
+  notes: string | null;
+  created_at: string;
 }
