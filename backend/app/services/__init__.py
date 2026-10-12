@@ -220,4 +220,9 @@ class AssetService:
         await self.repo.update_last_scanned(asset_id)
 
 
-from app.services.scans import ScanService
+from app.services.remediation import RemediationService
+from app.services.patch import PatchProcessor
+from app.services.validation import ValidationPipeline
+from app.services.approval import ApprovalService
+from app.services.application import PatchApplicationAdapter
+from app.services.rollback import RollbackService

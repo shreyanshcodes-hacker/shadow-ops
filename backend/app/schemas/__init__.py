@@ -834,3 +834,390 @@ class RelationshipConfirmRequest(BaseSchema):
 
 class RelationshipDismissRequest(BaseSchema):
     pass
+
+
+# =============================================================================
+# Stage 8: Remediation Schemas
+# =============================================================================
+
+class RemediationStatus(str, enum.Enum):
+    DRAFT = "DRAFT"
+    GENERATING = "GENERATING"
+    PROPOSED = "PROPOSED"
+    VALIDATING = "VALIDATING"
+    VALIDATION_FAILED = "VALIDATION_FAILED"
+    AWAITING_APPROVAL = "AWAITING_APPROVAL"
+    APPROVED = "APPROVED"
+    APPLYING = "APPLYING"
+    APPLIED = "APPLIED"
+    REJECTED = "REJECTED"
+    EXPIRED = "EXPIRED"
+    ROLLED_BACK = "ROLLED_BACK"
+    FAILED = "FAILED"
+
+
+class RemediationFixType(str, enum.Enum):
+    CODE_CHANGE = "code_change"
+    CONFIG_CHANGE = "config_change"
+    DEPENDENCY_UPDATE = "dependency_update"
+    INFRASTRUCTURE_CHANGE = "infrastructure_change"
+    WAF_RULE = "waf_rule"
+    NETWORK_POLICY = "network_policy"
+    SECRET_ROTATION = "secret_rotation"
+
+
+class ValidationStatus(str, enum.Enum):
+    PENDING = "PENDING"
+    RUNNING = "RUNNING"
+    PASSED = "PASSED"
+    FAILED = "FAILED"
+    BLOCKED = "BLOCKED"
+    ERROR = "ERROR"
+
+
+class ValidationCheckType(str, enum.Enum):
+    PATCH_INTEGRITY = "patch_integrity"
+    DIFF_PARSING = "diff_parsing"
+    PATH_ALLOWLIST = "path_allowlist"
+    SYNTAX_VALIDATION = "syntax_validation"
+    SEMGREP_RESCAN = "semgrep_rescan"
+    REGRESSION_CHECK = "regression_check"
+    EXISTING_TESTS = "existing_tests"
+
+
+class ApplicationStatus(str, enum.Enum):
+    PENDING = "PENDING"
+    CHECKPOINT_CREATED = "CHECKPOINT_CREATED"
+    PATCH_APPLIED = "PATCH_APPLIED"
+    VERIFIED = "VERIFIED"
+    FAILED = "FAILED"
+    ROLLED_BACK = "ROLLED_BACK"
+
+
+class RollbackStatus(str, enum.Enum):
+    PENDING = "PENDING"
+    IN_PROGRESS = "IN_PROGRESS"
+    COMPLETED = "COMPLETED"
+    FAILED = "FAILED"
+    BLOCKED_DIVERGED = "BLOCKED_DIVERGED"
+
+
+class VerificationHandoffStatus(str, enum.Enum):
+    PENDING_VERIFICATION = "PENDING_VERIFICATION"
+    VERIFICATION_REQUESTED = "VERIFICATION_REQUESTED"
+    VERIFIED = "VERIFIED"
+    VERIFICATION_FAILED = "VERIFICATION_FAILED"
+    MANUAL_REVIEW_REQUIRED = "MANUAL_REVIEW_REQUIRED"
+
+
+class AffectedFile(BaseSchema):
+    file_path: str
+    language: Optional[str] = None
+    change_type: str  # "modify", "create", "delete"
+
+
+class SuggestedTest(BaseSchema):
+    test_type: str  # "unit", "integration", "security", "regression"
+    description: str
+    command: Optional[str] = None
+
+
+class FileChange(BaseSchema):
+    file_path: str
+    old_hash: Optional[str] = None
+    new_hash: Optional[str] = None
+    additions: int = 0
+    deletions: int = 0
+
+
+# Remediation Proposal schemas
+class RemediationProposalBase(BaseSchema):
+    workspace_id: UUID
+    asset_id: UUID
+    finding_id: UUID
+    source_scan_id: UUID
+    proposal_title: str = Field(min_length=1, max_length=255)
+    problem_summary: str = Field(min_length=10)
+    proposed_solution: str = Field(min_length=10)
+    rationale: str = Field(min_length=10)
+    affected_files: List[AffectedFile] = Field(default_factory=list)
+    fix_type: RemediationFixType = RemediationFixType.CODE_CHANGE
+    expected_security_benefit: Optional[str] = None
+    compatibility_risks: Optional[str] = None
+    assumptions: Optional[str] = None
+    limitations: Optional[str] = None
+    suggested_tests: List[SuggestedTest] = Field(default_factory=list)
+
+
+class RemediationProposalCreate(RemediationProposalBase):
+    pass
+
+
+class RemediationProposalUpdate(BaseSchema):
+    status: Optional[RemediationStatus] = None
+    proposal_title: Optional[str] = Field(default=None, min_length=1, max_length=255)
+    problem_summary: Optional[str] = None
+    proposed_solution: Optional[str] = None
+    rationale: Optional[str] = None
+    affected_files: Optional[List[AffectedFile]] = None
+    validation_results: Optional[Dict[str, Any]] = None
+    approved_by: Optional[UUID] = None
+    approved_at: Optional[datetime] = None
+    applied_by: Optional[UUID] = None
+    applied_at: Optional[datetime] = None
+    failure_reason: Optional[str] = None
+
+
+class RemediationProposalResponse(RemediationProposalBase):
+    id: UUID
+    status: RemediationStatus
+    validation_results: Dict[str, Any]
+    patch_reference: Optional[UUID] = None
+    created_by: UUID
+    created_at: datetime
+    updated_at: datetime
+    approved_by: Optional[UUID] = None
+    approved_at: Optional[datetime] = None
+    applied_by: Optional[UUID] = None
+    applied_at: Optional[datetime] = None
+    failure_reason: Optional[str] = None
+    version: int
+    expires_at: Optional[datetime] = None
+    finding: Optional["FindingListResponse"] = None
+    asset: Optional["AssetResponse"] = None
+
+
+class RemediationProposalListResponse(BaseSchema):
+    id: UUID
+    workspace_id: UUID
+    asset_id: UUID
+    finding_id: UUID
+    source_scan_id: UUID
+    proposal_title: str
+    status: RemediationStatus
+    fix_type: RemediationFixType
+    created_by: UUID
+    created_at: datetime
+    approved_at: Optional[datetime] = None
+    applied_at: Optional[datetime] = None
+
+
+# Patch Version schemas
+class PatchVersionBase(BaseSchema):
+    proposal_id: UUID
+    version: int = Field(ge=1)
+    unified_diff: str
+    file_changes: List[FileChange] = Field(default_factory=list)
+    patch_hash: str
+    base_revision: Optional[str] = None
+
+
+class PatchVersionCreate(PatchVersionBase):
+    pass
+
+
+class PatchVersionResponse(PatchVersionBase):
+    id: UUID
+    workspace_id: UUID
+    created_by: UUID
+    created_at: datetime
+    is_current: bool
+    superseded_by: Optional[UUID] = None
+
+
+# Validation Run schemas
+class ValidationRunBase(BaseSchema):
+    proposal_id: UUID
+    patch_version_id: UUID
+    check_type: ValidationCheckType
+    command: Optional[str] = None
+
+
+class ValidationRunCreate(ValidationRunBase):
+    pass
+
+
+class ValidationRunUpdate(BaseSchema):
+    status: Optional[ValidationStatus] = None
+    exit_code: Optional[int] = None
+    stdout: Optional[str] = None
+    stderr: Optional[str] = None
+    duration_ms: Optional[int] = None
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    error_message: Optional[str] = None
+    metadata: Optional[Dict[str, Any]] = None
+
+
+class ValidationRunResponse(ValidationRunBase):
+    id: UUID
+    workspace_id: UUID
+    status: ValidationStatus
+    exit_code: Optional[int] = None
+    stdout: Optional[str] = None
+    stderr: Optional[str] = None
+    duration_ms: Optional[int] = None
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    error_message: Optional[str] = None
+    metadata: Dict[str, Any]
+    created_at: datetime
+
+
+# Approval schemas
+class RemediationApprovalBase(BaseSchema):
+    proposal_id: UUID
+    patch_version_id: UUID
+    decision: str  # "approved" or "rejected"
+    justification: Optional[str] = None
+    conditions: List[str] = Field(default_factory=list)
+    patch_hash: str
+    proposal_version: int
+    validation_snapshot: Dict[str, Any] = Field(default_factory=dict)
+
+
+class RemediationApprovalCreate(RemediationApprovalBase):
+    pass
+
+
+class RemediationApprovalResponse(RemediationApprovalBase):
+    id: UUID
+    workspace_id: UUID
+    approved_by: UUID
+    approved_at: datetime
+    expires_at: Optional[datetime] = None
+    approver: Optional["ProfileResponse"] = None
+
+
+# Application schemas
+class RemediationApplicationBase(BaseSchema):
+    proposal_id: UUID
+    patch_version_id: UUID
+    approval_id: UUID
+    asset_id: UUID
+    target_revision: str
+    checkpoint_ref: Optional[str] = None
+    idempotency_key: str
+
+
+class RemediationApplicationCreate(RemediationApplicationBase):
+    pass
+
+
+class RemediationApplicationResponse(RemediationApplicationBase):
+    id: UUID
+    workspace_id: UUID
+    status: ApplicationStatus
+    applied_by: UUID
+    applied_at: datetime
+    completed_at: Optional[datetime] = None
+    result_diff: Optional[str] = None
+    changed_files: List[FileChange] = Field(default_factory=list)
+    validation_results: Dict[str, Any]
+    failure_reason: Optional[str] = None
+    applier: Optional["ProfileResponse"] = None
+
+
+# Rollback schemas
+class RemediationRollbackBase(BaseSchema):
+    proposal_id: UUID
+    application_id: UUID
+    asset_id: UUID
+    reason: str
+    checkpoint_ref: str
+
+
+class RemediationRollbackCreate(RemediationRollbackBase):
+    pass
+
+
+class RemediationRollbackResponse(RemediationRollbackBase):
+    id: UUID
+    workspace_id: UUID
+    status: RollbackStatus
+    requested_by: UUID
+    verification_diff: Optional[str] = None
+    started_at: datetime
+    completed_at: Optional[datetime] = None
+    failure_reason: Optional[str] = None
+    requester: Optional["ProfileResponse"] = None
+
+
+# Verification Handoff schemas
+class RemediationVerificationHandoffBase(BaseSchema):
+    proposal_id: UUID
+    application_id: UUID
+    finding_id: UUID
+    asset_id: UUID
+    patch_hash: str
+    repository_revision: str
+    changed_files: List[FileChange] = Field(default_factory=list)
+    validation_results: Dict[str, Any] = Field(default_factory=dict)
+    original_finding_snapshot: Dict[str, Any] = Field(default_factory=dict)
+    applied_at: datetime
+    applied_by: UUID
+
+
+class RemediationVerificationHandoffCreate(RemediationVerificationHandoffBase):
+    pass
+
+
+class RemediationVerificationHandoffResponse(RemediationVerificationHandoffBase):
+    id: UUID
+    workspace_id: UUID
+    verification_requested: bool
+    verification_requested_at: Optional[datetime] = None
+    verification_completed_at: Optional[datetime] = None
+    verification_result: Optional[Dict[str, Any]] = None
+    status: VerificationHandoffStatus
+    finding: Optional["FindingListResponse"] = None
+    asset: Optional["AssetResponse"] = None
+
+
+# API Request/Response schemas
+class GenerateRemediationRequest(BaseSchema):
+    finding_id: UUID
+
+
+class ValidateRemediationRequest(BaseSchema):
+    proposal_id: UUID
+
+
+class ApproveRemediationRequest(BaseSchema):
+    proposal_id: UUID
+    patch_version_id: UUID
+    justification: Optional[str] = None
+    conditions: List[str] = Field(default_factory=list)
+
+
+class RejectRemediationRequest(BaseSchema):
+    proposal_id: UUID
+    patch_version_id: UUID
+    justification: str  # Required for rejection
+
+
+class ApplyRemediationRequest(BaseSchema):
+    proposal_id: UUID
+    patch_version_id: UUID
+    approval_id: UUID
+    idempotency_key: str
+
+
+class RollbackRemediationRequest(BaseSchema):
+    application_id: UUID
+    reason: str
+
+
+class RequestVerificationRequest(BaseSchema):
+    application_id: UUID
+
+
+# Response schemas for API
+class RemediationDetailResponse(BaseSchema):
+    proposal: RemediationProposalResponse
+    patch_versions: List[PatchVersionResponse] = Field(default_factory=list)
+    validations: List[ValidationRunResponse] = Field(default_factory=list)
+    approvals: List[RemediationApprovalResponse] = Field(default_factory=list)
+    applications: List[RemediationApplicationResponse] = Field(default_factory=list)
+    rollbacks: List[RemediationRollbackResponse] = Field(default_factory=list)
+    verification_handoff: Optional[RemediationVerificationHandoffResponse] = None

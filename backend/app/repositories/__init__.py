@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update, delete, func, and_, or_
 from sqlalchemy.orm import selectinload
 
-from app.models import Profile, Workspace, WorkspaceMember, Asset, AssetAuthorization, WorkspaceRole, AuthorizationStatus, Scan, ScanEvent, Finding, FindingEvidence, ScanTarget, ScanStatus, ScanProfile, ScanEventType, FindingSource, FindingSeverity, FindingConfidence, FindingStatus, FindingEvidenceType, AiRun, FindingAiAnalysis, AiProviderType, AiOperationType, AiRunStatus, FindingRelationship, RelationshipType, RelationshipSource, AttackPath, AttackPathStatus, AttackPathNode, AttackPathNodeType, AttackPathEdge, RiskSnapshot, SecurityTeamRun, SecurityTeamRunStatus, AgentRun, AgentName, AgentRunStatus, TeamAssessment, TeamReview
+from app.models import Profile, Workspace, WorkspaceMember, Asset, AssetAuthorization, WorkspaceRole, AuthorizationStatus, Scan, ScanEvent, Finding, FindingEvidence, ScanTarget, ScanStatus, ScanProfile, ScanEventType, FindingSource, FindingSeverity, FindingConfidence, FindingStatus, FindingEvidenceType, AiRun, FindingAiAnalysis, AiProviderType, AiOperationType, AiRunStatus, FindingRelationship, RelationshipType, RelationshipSource, AttackPath, AttackPathStatus, AttackPathNode, AttackPathNodeType, AttackPathEdge, RiskSnapshot, SecurityTeamRun, SecurityTeamRunStatus, AgentRun, AgentName, AgentRunStatus, TeamAssessment, TeamReview, RemediationProposal, RemediationStatus, PatchVersion, ValidationRun, ValidationStatus, ValidationCheckType, RemediationApproval, RemediationApplication, ApplicationStatus, RemediationRollback, RollbackStatus, RemediationVerificationHandoff, VerificationHandoffStatus, RemediationFixType
 
 
 class ProfileRepository:
@@ -940,3 +940,231 @@ class TeamReviewRepository:
             select(TeamReview).where(TeamReview.workspace_id == workspace_id).order_by(TeamReview.reviewed_at.desc()).limit(limit).offset(offset)
         )
         return list(result.scalars().all())
+
+
+class RemediationProposalRepository:
+    def __init__(self, db: AsyncSession):
+        self.db = db
+
+    async def create(self, proposal: RemediationProposal) -> RemediationProposal:
+        self.db.add(proposal)
+        await self.db.flush()
+        await self.db.refresh(proposal)
+        return proposal
+
+    async def get_by_id(self, proposal_id: UUID) -> Optional[RemediationProposal]:
+        result = await self.db.execute(select(RemediationProposal).where(RemediationProposal.id == proposal_id))
+        return result.scalar_one_or_none()
+
+    async def get_by_finding(self, finding_id: UUID) -> List[RemediationProposal]:
+        result = await self.db.execute(
+            select(RemediationProposal).where(RemediationProposal.finding_id == finding_id).order_by(RemediationProposal.created_at.desc())
+        )
+        return list(result.scalars().all())
+
+    async def get_by_workspace(self, workspace_id: UUID, status: Optional[RemediationStatus] = None, limit: int = 50, offset: int = 0) -> List[RemediationProposal]:
+        query = select(RemediationProposal).where(RemediationProposal.workspace_id == workspace_id).order_by(RemediationProposal.created_at.desc()).limit(limit).offset(offset)
+        if status:
+            query = query.where(RemediationProposal.status == status)
+        result = await self.db.execute(query)
+        return list(result.scalars().all())
+
+    async def update(self, proposal_id: UUID, data: Dict[str, Any]) -> Optional[RemediationProposal]:
+        result = await self.db.execute(
+            update(RemediationProposal).where(RemediationProposal.id == proposal_id).values(**data).returning(RemediationProposal)
+        )
+        return result.scalar_one_or_none()
+
+    async def increment_version(self, proposal_id: UUID) -> Optional[RemediationProposal]:
+        result = await self.db.execute(
+            update(RemediationProposal).where(RemediationProposal.id == proposal_id).values(version=RemediationProposal.version + 1).returning(RemediationProposal)
+        )
+        return result.scalar_one_or_none()
+
+
+class PatchVersionRepository:
+    def __init__(self, db: AsyncSession):
+        self.db = db
+
+    async def create(self, patch: PatchVersion) -> PatchVersion:
+        self.db.add(patch)
+        await self.db.flush()
+        await self.db.refresh(patch)
+        return patch
+
+    async def get_by_id(self, patch_id: UUID) -> Optional[PatchVersion]:
+        result = await self.db.execute(select(PatchVersion).where(PatchVersion.id == patch_id))
+        return result.scalar_one_or_none()
+
+    async def get_by_proposal(self, proposal_id: UUID) -> List[PatchVersion]:
+        result = await self.db.execute(
+            select(PatchVersion).where(PatchVersion.proposal_id == proposal_id).order_by(PatchVersion.version)
+        )
+        return list(result.scalars().all())
+
+    async def get_current(self, proposal_id: UUID) -> Optional[PatchVersion]:
+        result = await self.db.execute(
+            select(PatchVersion).where(PatchVersion.proposal_id == proposal_id, PatchVersion.is_current == True)
+        )
+        return result.scalar_one_or_none()
+
+    async def set_current(self, proposal_id: UUID, patch_id: UUID) -> None:
+        await self.db.execute(
+            update(PatchVersion).where(PatchVersion.proposal_id == proposal_id).values(is_current=False)
+        )
+        await self.db.execute(
+            update(PatchVersion).where(PatchVersion.id == patch_id).values(is_current=True)
+        )
+
+
+class ValidationRunRepository:
+    def __init__(self, db: AsyncSession):
+        self.db = db
+
+    async def create(self, validation: ValidationRun) -> ValidationRun:
+        self.db.add(validation)
+        await self.db.flush()
+        await self.db.refresh(validation)
+        return validation
+
+    async def get_by_id(self, validation_id: UUID) -> Optional[ValidationRun]:
+        result = await self.db.execute(select(ValidationRun).where(ValidationRun.id == validation_id))
+        return result.scalar_one_or_none()
+
+    async def get_by_proposal(self, proposal_id: UUID) -> List[ValidationRun]:
+        result = await self.db.execute(
+            select(ValidationRun).where(ValidationRun.proposal_id == proposal_id).order_by(ValidationRun.created_at.desc())
+        )
+        return list(result.scalars().all())
+
+    async def get_by_patch_version(self, patch_version_id: UUID) -> List[ValidationRun]:
+        result = await self.db.execute(
+            select(ValidationRun).where(ValidationRun.patch_version_id == patch_version_id).order_by(ValidationRun.created_at.desc())
+        )
+        return list(result.scalars().all())
+
+    async def get_latest_by_type(self, proposal_id: UUID, check_type: ValidationCheckType) -> Optional[ValidationRun]:
+        result = await self.db.execute(
+            select(ValidationRun).where(
+                ValidationRun.proposal_id == proposal_id,
+                ValidationRun.check_type == check_type
+            ).order_by(ValidationRun.created_at.desc()).limit(1)
+        )
+        return result.scalar_one_or_none()
+
+
+class RemediationApprovalRepository:
+    def __init__(self, db: AsyncSession):
+        self.db = db
+
+    async def create(self, approval: RemediationApproval) -> RemediationApproval:
+        self.db.add(approval)
+        await self.db.flush()
+        await self.db.refresh(approval)
+        return approval
+
+    async def get_by_id(self, approval_id: UUID) -> Optional[RemediationApproval]:
+        result = await self.db.execute(select(RemediationApproval).where(RemediationApproval.id == approval_id))
+        return result.scalar_one_or_none()
+
+    async def get_by_proposal(self, proposal_id: UUID) -> List[RemediationApproval]:
+        result = await self.db.execute(
+            select(RemediationApproval).where(RemediationApproval.proposal_id == proposal_id).order_by(RemediationApproval.approved_at.desc())
+        )
+        return list(result.scalars().all())
+
+    async def get_latest_approval(self, proposal_id: UUID) -> Optional[RemediationApproval]:
+        result = await self.db.execute(
+            select(RemediationApproval).where(RemediationApproval.proposal_id == proposal_id).order_by(RemediationApproval.approved_at.desc()).limit(1)
+        )
+        return result.scalar_one_or_none()
+
+    async def get_by_patch_hash(self, proposal_id: UUID, patch_hash: str) -> Optional[RemediationApproval]:
+        result = await self.db.execute(
+            select(RemediationApproval).where(
+                RemediationApproval.proposal_id == proposal_id,
+                RemediationApproval.patch_hash == patch_hash
+            ).order_by(RemediationApproval.approved_at.desc()).limit(1)
+        )
+        return result.scalar_one_or_none()
+
+
+class RemediationApplicationRepository:
+    def __init__(self, db: AsyncSession):
+        self.db = db
+
+    async def create(self, application: RemediationApplication) -> RemediationApplication:
+        self.db.add(application)
+        await self.db.flush()
+        await self.db.refresh(application)
+        return application
+
+    async def get_by_id(self, application_id: UUID) -> Optional[RemediationApplication]:
+        result = await self.db.execute(select(RemediationApplication).where(RemediationApplication.id == application_id))
+        return result.scalar_one_or_none()
+
+    async def get_by_proposal(self, proposal_id: UUID) -> List[RemediationApplication]:
+        result = await self.db.execute(
+            select(RemediationApplication).where(RemediationApplication.proposal_id == proposal_id).order_by(RemediationApplication.applied_at.desc())
+        )
+        return list(result.scalars().all())
+
+    async def get_by_idempotency_key(self, idempotency_key: str) -> Optional[RemediationApplication]:
+        result = await self.db.execute(
+            select(RemediationApplication).where(RemediationApplication.idempotency_key == idempotency_key)
+        )
+        return result.scalar_one_or_none()
+
+    async def get_by_approval(self, approval_id: UUID) -> List[RemediationApplication]:
+        result = await self.db.execute(
+            select(RemediationApplication).where(RemediationApplication.approval_id == approval_id).order_by(RemediationApplication.applied_at.desc())
+        )
+        return list(result.scalars().all())
+
+
+class RemediationRollbackRepository:
+    def __init__(self, db: AsyncSession):
+        self.db = db
+
+    async def create(self, rollback: RemediationRollback) -> RemediationRollback:
+        self.db.add(rollback)
+        await self.db.flush()
+        await self.db.refresh(rollback)
+        return rollback
+
+    async def get_by_id(self, rollback_id: UUID) -> Optional[RemediationRollback]:
+        result = await self.db.execute(select(RemediationRollback).where(RemediationRollback.id == rollback_id))
+        return result.scalar_one_or_none()
+
+    async def get_by_application(self, application_id: UUID) -> List[RemediationRollback]:
+        result = await self.db.execute(
+            select(RemediationRollback).where(RemediationRollback.application_id == application_id).order_by(RemediationRollback.started_at.desc())
+        )
+        return list(result.scalars().all())
+
+
+class RemediationVerificationHandoffRepository:
+    def __init__(self, db: AsyncSession):
+        self.db = db
+
+    async def create(self, handoff: RemediationVerificationHandoff) -> RemediationVerificationHandoff:
+        self.db.add(handoff)
+        await self.db.flush()
+        await self.db.refresh(handoff)
+        return handoff
+
+    async def get_by_id(self, handoff_id: UUID) -> Optional[RemediationVerificationHandoff]:
+        result = await self.db.execute(select(RemediationVerificationHandoff).where(RemediationVerificationHandoff.id == handoff_id))
+        return result.scalar_one_or_none()
+
+    async def get_by_proposal(self, proposal_id: UUID) -> Optional[RemediationVerificationHandoff]:
+        result = await self.db.execute(
+            select(RemediationVerificationHandoff).where(RemediationVerificationHandoff.proposal_id == proposal_id)
+        )
+        return result.scalar_one_or_none()
+
+    async def get_by_application(self, application_id: UUID) -> Optional[RemediationVerificationHandoff]:
+        result = await self.db.execute(
+            select(RemediationVerificationHandoff).where(RemediationVerificationHandoff.application_id == application_id)
+        )
+        return result.scalar_one_or_none()

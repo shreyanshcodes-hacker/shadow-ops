@@ -836,7 +836,12 @@ class SecurityTeamRun(Base):
         Index("idx_security_team_runs_status", "status"),
         Index("idx_security_team_runs_requested_by", "requested_by"),
         Index("idx_security_team_runs_created_at", "created_at"),
-        UniqueConstraint("workspace_id", "asset_id", "scan_id", "orchestration_version", name="uq_security_team_run_active", postgresql_where=status.in_([SecurityTeamRunStatus.QUEUED, SecurityTeamRunStatus.RUNNING])),
+        Index(
+            "uq_security_team_run_active",
+            "workspace_id", "asset_id", "scan_id", "orchestration_version",
+            unique=True,
+            postgresql_where=status.in_([SecurityTeamRunStatus.QUEUED, SecurityTeamRunStatus.RUNNING]),
+        ),
     )
 
     def __repr__(self) -> str:
@@ -932,3 +937,365 @@ class TeamReview(Base):
 
     def __repr__(self) -> str:
         return f"<TeamReview(team_run={self.team_run_id}, reviewed_by={self.reviewed_by})>"
+
+
+class RemediationStatus(str, enum.Enum):
+    DRAFT = "DRAFT"
+    GENERATING = "GENERATING"
+    PROPOSED = "PROPOSED"
+    VALIDATING = "VALIDATING"
+    VALIDATION_FAILED = "VALIDATION_FAILED"
+    AWAITING_APPROVAL = "AWAITING_APPROVAL"
+    APPROVED = "APPROVED"
+    APPLYING = "APPLYING"
+    APPLIED = "APPLIED"
+    REJECTED = "REJECTED"
+    EXPIRED = "EXPIRED"
+    ROLLED_BACK = "ROLLED_BACK"
+    FAILED = "FAILED"
+
+
+class RemediationFixType(str, enum.Enum):
+    CODE_CHANGE = "code_change"
+    CONFIG_CHANGE = "config_change"
+    DEPENDENCY_UPDATE = "dependency_update"
+    INFRASTRUCTURE_CHANGE = "infrastructure_change"
+    WAF_RULE = "waf_rule"
+    NETWORK_POLICY = "network_policy"
+    SECRET_ROTATION = "secret_rotation"
+
+
+class ValidationStatus(str, enum.Enum):
+    PENDING = "PENDING"
+    RUNNING = "RUNNING"
+    PASSED = "PASSED"
+    FAILED = "FAILED"
+    BLOCKED = "BLOCKED"
+    ERROR = "ERROR"
+
+
+class ValidationCheckType(str, enum.Enum):
+    PATCH_INTEGRITY = "patch_integrity"
+    DIFF_PARSING = "diff_parsing"
+    PATH_ALLOWLIST = "path_allowlist"
+    SYNTAX_VALIDATION = "syntax_validation"
+    SEMGREP_RESCAN = "semgrep_rescan"
+    REGRESSION_CHECK = "regression_check"
+    EXISTING_TESTS = "existing_tests"
+
+
+class ApplicationStatus(str, enum.Enum):
+    PENDING = "PENDING"
+    CHECKPOINT_CREATED = "CHECKPOINT_CREATED"
+    PATCH_APPLIED = "PATCH_APPLIED"
+    VERIFIED = "VERIFIED"
+    FAILED = "FAILED"
+    ROLLED_BACK = "ROLLED_BACK"
+
+
+class RollbackStatus(str, enum.Enum):
+    PENDING = "PENDING"
+    IN_PROGRESS = "IN_PROGRESS"
+    COMPLETED = "COMPLETED"
+    FAILED = "FAILED"
+    BLOCKED_DIVERGED = "BLOCKED_DIVERGED"
+
+
+class VerificationHandoffStatus(str, enum.Enum):
+    PENDING_VERIFICATION = "PENDING_VERIFICATION"
+    VERIFICATION_REQUESTED = "VERIFICATION_REQUESTED"
+    VERIFIED = "VERIFIED"
+    VERIFICATION_FAILED = "VERIFICATION_FAILED"
+    MANUAL_REVIEW_REQUIRED = "MANUAL_REVIEW_REQUIRED"
+
+
+class RemediationProposal(Base):
+    __tablename__ = "remediation_proposals"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False, index=True)
+    asset_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("assets.id", ondelete="CASCADE"), nullable=False, index=True)
+    finding_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("findings.id", ondelete="CASCADE"), nullable=False, index=True)
+    source_scan_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("scans.id", ondelete="CASCADE"), nullable=False, index=True)
+    status: Mapped[RemediationStatus] = mapped_column(SQLEnum(RemediationStatus), default=RemediationStatus.DRAFT, nullable=False, index=True)
+    proposal_title: Mapped[str] = mapped_column(Text, nullable=False)
+    problem_summary: Mapped[str] = mapped_column(Text, nullable=False)
+    proposed_solution: Mapped[str] = mapped_column(Text, nullable=False)
+    rationale: Mapped[str] = mapped_column(Text, nullable=False)
+    affected_files: Mapped[list] = mapped_column(JSONB, default=list, nullable=False)
+    patch_reference: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), ForeignKey("patch_versions.id", ondelete="SET NULL"), nullable=True)
+    validation_results: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
+    fix_type: Mapped[RemediationFixType] = mapped_column(SQLEnum(RemediationFixType), default=RemediationFixType.CODE_CHANGE, nullable=False)
+    expected_security_benefit: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    compatibility_risks: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    assumptions: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    limitations: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    suggested_tests: Mapped[list] = mapped_column(JSONB, default=list, nullable=False)
+    created_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("profiles.id", ondelete="RESTRICT"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    approved_by: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), ForeignKey("profiles.id", ondelete="SET NULL"), nullable=True)
+    approved_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    applied_by: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), ForeignKey("profiles.id", ondelete="SET NULL"), nullable=True)
+    applied_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    failure_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    version: Mapped[int] = mapped_column(default=1, nullable=False)
+    expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+
+    # Relationships
+    workspace: Mapped["Workspace"] = relationship("Workspace")
+    asset: Mapped["Asset"] = relationship("Asset")
+    finding: Mapped["Finding"] = relationship("Finding")
+    source_scan: Mapped["Scan"] = relationship("Scan")
+    creator: Mapped["Profile"] = relationship("Profile", foreign_keys=[created_by])
+    approver: Mapped[Optional["Profile"]] = relationship("Profile", foreign_keys=[approved_by])
+    applier: Mapped[Optional["Profile"]] = relationship("Profile", foreign_keys=[applied_by])
+    patch_versions: Mapped[List["PatchVersion"]] = relationship("PatchVersion", back_populates="proposal", cascade="all, delete-orphan", order_by="PatchVersion.version", foreign_keys="PatchVersion.proposal_id")
+    validations: Mapped[List["ValidationRun"]] = relationship("ValidationRun", back_populates="proposal", cascade="all, delete-orphan", foreign_keys="ValidationRun.proposal_id")
+    approvals: Mapped[List["RemediationApproval"]] = relationship("RemediationApproval", back_populates="proposal", cascade="all, delete-orphan", foreign_keys="RemediationApproval.proposal_id")
+    applications: Mapped[List["RemediationApplication"]] = relationship("RemediationApplication", back_populates="proposal", cascade="all, delete-orphan", foreign_keys="RemediationApplication.proposal_id")
+    rollbacks: Mapped[List["RemediationRollback"]] = relationship("RemediationRollback", back_populates="proposal", cascade="all, delete-orphan", foreign_keys="RemediationRollback.proposal_id")
+    verification_handoff: Mapped[Optional["RemediationVerificationHandoff"]] = relationship("RemediationVerificationHandoff", back_populates="proposal", uselist=False, cascade="all, delete-orphan", foreign_keys="RemediationVerificationHandoff.proposal_id")
+
+    __table_args__ = (
+        Index("idx_remediation_proposals_ws_id", "workspace_id"),
+        Index("idx_remediation_proposals_asset_id", "asset_id"),
+        Index("idx_remediation_proposals_finding_id", "finding_id"),
+        Index("idx_remediation_proposals_scan_id", "source_scan_id"),
+        Index("idx_remediation_proposals_status", "status"),
+        Index("idx_remediation_proposals_created_by", "created_by"),
+        Index("idx_remediation_proposals_approved_by", "approved_by"),
+        Index("idx_remediation_proposals_expires_at", "expires_at"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<RemediationProposal(id={self.id}, finding_id={self.finding_id}, status={self.status})>"
+
+
+class PatchVersion(Base):
+    __tablename__ = "patch_versions"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    proposal_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("remediation_proposals.id", ondelete="CASCADE"), nullable=False, index=True)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False, index=True)
+    version: Mapped[int] = mapped_column(nullable=False)
+    unified_diff: Mapped[str] = mapped_column(Text, nullable=False)
+    file_changes: Mapped[list] = mapped_column(JSONB, default=list, nullable=False)
+    patch_hash: Mapped[str] = mapped_column(Text, nullable=False, index=True)
+    base_revision: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("profiles.id", ondelete="RESTRICT"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    is_current: Mapped[bool] = mapped_column(default=False, nullable=False)
+    superseded_by: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), ForeignKey("patch_versions.id", ondelete="SET NULL"), nullable=True)
+
+    # Relationships
+    proposal: Mapped["RemediationProposal"] = relationship("RemediationProposal", back_populates="patch_versions", foreign_keys="PatchVersion.proposal_id")
+    workspace: Mapped["Workspace"] = relationship("Workspace")
+    creator: Mapped["Profile"] = relationship("Profile", foreign_keys=[created_by])
+    validations: Mapped[List["ValidationRun"]] = relationship("ValidationRun", back_populates="patch_version", cascade="all, delete-orphan", foreign_keys="ValidationRun.patch_version_id")
+    approvals: Mapped[List["RemediationApproval"]] = relationship("RemediationApproval", back_populates="patch_version", cascade="all, delete-orphan", foreign_keys="RemediationApproval.patch_version_id")
+    applications: Mapped[List["RemediationApplication"]] = relationship("RemediationApplication", back_populates="patch_version", cascade="all, delete-orphan", foreign_keys="RemediationApplication.patch_version_id")
+
+    __table_args__ = (
+        UniqueConstraint("proposal_id", "version", name="uq_patch_version_proposal_version"),
+        Index("idx_patch_versions_proposal_id", "proposal_id"),
+        Index("idx_patch_versions_workspace_id", "workspace_id"),
+        Index("idx_patch_versions_patch_hash", "patch_hash"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<PatchVersion(proposal_id={self.proposal_id}, version={self.version}, hash={self.patch_hash[:16]}...)>"
+
+
+class ValidationRun(Base):
+    __tablename__ = "validation_runs"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    proposal_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("remediation_proposals.id", ondelete="CASCADE"), nullable=False, index=True)
+    patch_version_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("patch_versions.id", ondelete="CASCADE"), nullable=False, index=True)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False, index=True)
+    status: Mapped[ValidationStatus] = mapped_column(SQLEnum(ValidationStatus), default=ValidationStatus.PENDING, nullable=False, index=True)
+    check_type: Mapped[ValidationCheckType] = mapped_column(SQLEnum(ValidationCheckType), nullable=False, index=True)
+    command: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    exit_code: Mapped[Optional[int]] = mapped_column(nullable=True)
+    stdout: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    stderr: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    duration_ms: Mapped[Optional[int]] = mapped_column(nullable=True)
+    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    metadata: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    # Relationships
+    proposal: Mapped["RemediationProposal"] = relationship("RemediationProposal", back_populates="validations", foreign_keys="ValidationRun.proposal_id")
+    patch_version: Mapped["PatchVersion"] = relationship("PatchVersion", back_populates="validations", foreign_keys="ValidationRun.patch_version_id")
+    workspace: Mapped["Workspace"] = relationship("Workspace")
+
+    __table_args__ = (
+        Index("idx_validation_runs_proposal_id", "proposal_id"),
+        Index("idx_validation_runs_patch_version_id", "patch_version_id"),
+        Index("idx_validation_runs_workspace_id", "workspace_id"),
+        Index("idx_validation_runs_status", "status"),
+        Index("idx_validation_runs_check_type", "check_type"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<ValidationRun(proposal_id={self.proposal_id}, check_type={self.check_type}, status={self.status})>"
+
+
+class RemediationApproval(Base):
+    __tablename__ = "remediation_approvals"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    proposal_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("remediation_proposals.id", ondelete="CASCADE"), nullable=False, index=True)
+    patch_version_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("patch_versions.id", ondelete="CASCADE"), nullable=False, index=True)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False, index=True)
+    approved_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("profiles.id", ondelete="RESTRICT"), nullable=False)
+    decision: Mapped[str] = mapped_column(Text, nullable=False)
+    justification: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    conditions: Mapped[list] = mapped_column(JSONB, default=list, nullable=False)
+    patch_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    proposal_version: Mapped[int] = mapped_column(nullable=False)
+    validation_snapshot: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
+    approved_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    # Relationships
+    proposal: Mapped["RemediationProposal"] = relationship("RemediationProposal", back_populates="approvals", foreign_keys="RemediationApproval.proposal_id")
+    patch_version: Mapped["PatchVersion"] = relationship("PatchVersion", back_populates="approvals", foreign_keys="RemediationApproval.patch_version_id")
+    workspace: Mapped["Workspace"] = relationship("Workspace")
+    approver: Mapped["Profile"] = relationship("Profile", foreign_keys=[approved_by])
+
+    __table_args__ = (
+        Index("idx_remediation_approvals_proposal_id", "proposal_id"),
+        Index("idx_remediation_approvals_patch_version_id", "patch_version_id"),
+        Index("idx_remediation_approvals_workspace_id", "workspace_id"),
+        Index("idx_remediation_approvals_approved_by", "approved_by"),
+        Index("idx_remediation_approvals_decision", "decision"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<RemediationApproval(proposal_id={self.proposal_id}, decision={self.decision}, approved_by={self.approved_by})>"
+
+
+class RemediationApplication(Base):
+    __tablename__ = "remediation_applications"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    proposal_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("remediation_proposals.id", ondelete="CASCADE"), nullable=False, index=True)
+    patch_version_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("patch_versions.id", ondelete="CASCADE"), nullable=False, index=True)
+    approval_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("remediation_approvals.id", ondelete="CASCADE"), nullable=False, index=True)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False, index=True)
+    asset_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("assets.id", ondelete="CASCADE"), nullable=False, index=True)
+    status: Mapped[ApplicationStatus] = mapped_column(SQLEnum(ApplicationStatus), default=ApplicationStatus.PENDING, nullable=False, index=True)
+    target_revision: Mapped[str] = mapped_column(Text, nullable=False)
+    checkpoint_ref: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    applied_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("profiles.id", ondelete="RESTRICT"), nullable=False)
+    applied_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    result_diff: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    changed_files: Mapped[list] = mapped_column(JSONB, default=list, nullable=False)
+    validation_results: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
+    failure_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    idempotency_key: Mapped[str] = mapped_column(Text, nullable=False, unique=True, index=True)
+
+# Relationships
+    proposal: Mapped["RemediationProposal"] = relationship("RemediationProposal", back_populates="applications", foreign_keys="RemediationApplication.proposal_id")
+    patch_version: Mapped["PatchVersion"] = relationship("PatchVersion", back_populates="applications", foreign_keys="RemediationApplication.patch_version_id")
+    approval: Mapped["RemediationApproval"] = relationship("RemediationApproval", foreign_keys="RemediationApplication.approval_id")
+    workspace: Mapped["Workspace"] = relationship("Workspace")
+    asset: Mapped["Asset"] = relationship("Asset")
+    applier: Mapped["Profile"] = relationship("Profile", foreign_keys=[applied_by])
+    rollbacks: Mapped[List["RemediationRollback"]] = relationship("RemediationRollback", back_populates="application", cascade="all, delete-orphan", foreign_keys="RemediationRollback.application_id")
+    verification_handoff: Mapped[Optional["RemediationVerificationHandoff"]] = relationship("RemediationVerificationHandoff", back_populates="application", uselist=False, cascade="all, delete-orphan", foreign_keys="RemediationVerificationHandoff.application_id")
+
+    __table_args__ = (
+        Index("idx_remediation_applications_proposal_id", "proposal_id"),
+        Index("idx_remediation_applications_patch_version_id", "patch_version_id"),
+        Index("idx_remediation_applications_approval_id", "approval_id"),
+        Index("idx_remediation_applications_workspace_id", "workspace_id"),
+        Index("idx_remediation_applications_asset_id", "asset_id"),
+        Index("idx_remediation_applications_applied_by", "applied_by"),
+        Index("idx_remediation_applications_idempotency_key", "idempotency_key", unique=True),
+    )
+
+    def __repr__(self) -> str:
+        return f"<RemediationApplication(proposal_id={self.proposal_id}, status={self.status}, applied_by={self.applied_by})>"
+
+
+class RemediationRollback(Base):
+    __tablename__ = "remediation_rollbacks"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    proposal_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("remediation_proposals.id", ondelete="CASCADE"), nullable=False, index=True)
+    application_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("remediation_applications.id", ondelete="CASCADE"), nullable=False, index=True)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False, index=True)
+    asset_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("assets.id", ondelete="CASCADE"), nullable=False, index=True)
+    status: Mapped[RollbackStatus] = mapped_column(SQLEnum(RollbackStatus), default=RollbackStatus.PENDING, nullable=False, index=True)
+    requested_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("profiles.id", ondelete="RESTRICT"), nullable=False)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    checkpoint_ref: Mapped[str] = mapped_column(Text, nullable=False)
+    verification_diff: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    failure_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    # Relationships
+    proposal: Mapped["RemediationProposal"] = relationship("RemediationProposal", back_populates="rollbacks", foreign_keys="RemediationRollback.proposal_id")
+    application: Mapped["RemediationApplication"] = relationship("RemediationApplication", back_populates="rollbacks", foreign_keys="RemediationRollback.application_id")
+    workspace: Mapped["Workspace"] = relationship("Workspace")
+    asset: Mapped["Asset"] = relationship("Asset")
+    requester: Mapped["Profile"] = relationship("Profile", foreign_keys=[requested_by])
+
+    __table_args__ = (
+        Index("idx_remediation_rollbacks_proposal_id", "proposal_id"),
+        Index("idx_remediation_rollbacks_application_id", "application_id"),
+        Index("idx_remediation_rollbacks_workspace_id", "workspace_id"),
+        Index("idx_remediation_rollbacks_requested_by", "requested_by"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<RemediationRollback(proposal_id={self.proposal_id}, status={self.status})>"
+
+
+class RemediationVerificationHandoff(Base):
+    __tablename__ = "remediation_verification_handoff"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    proposal_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("remediation_proposals.id", ondelete="CASCADE"), nullable=False, index=True)
+    application_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("remediation_applications.id", ondelete="CASCADE"), nullable=False, index=True)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False, index=True)
+    finding_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("findings.id", ondelete="CASCADE"), nullable=False, index=True)
+    asset_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("assets.id", ondelete="CASCADE"), nullable=False, index=True)
+    patch_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    repository_revision: Mapped[str] = mapped_column(Text, nullable=False)
+    changed_files: Mapped[list] = mapped_column(JSONB, default=list, nullable=False)
+    validation_results: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
+    original_finding_snapshot: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
+    applied_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    applied_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("profiles.id", ondelete="RESTRICT"), nullable=False)
+    verification_requested: Mapped[bool] = mapped_column(default=False, nullable=False)
+    verification_requested_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    verification_completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    verification_result: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    status: Mapped[str] = mapped_column(Text, default=VerificationHandoffStatus.PENDING_VERIFICATION.value, nullable=False, index=True)
+
+    # Relationships
+    proposal: Mapped["RemediationProposal"] = relationship("RemediationProposal", back_populates="verification_handoff", foreign_keys="RemediationVerificationHandoff.proposal_id")
+    application: Mapped["RemediationApplication"] = relationship("RemediationApplication", back_populates="verification_handoff", foreign_keys="RemediationVerificationHandoff.application_id")
+    workspace: Mapped["Workspace"] = relationship("Workspace")
+    finding: Mapped["Finding"] = relationship("Finding", foreign_keys="RemediationVerificationHandoff.finding_id")
+    asset: Mapped["Asset"] = relationship("Asset", foreign_keys="RemediationVerificationHandoff.asset_id")
+    applier: Mapped["Profile"] = relationship("Profile", foreign_keys=[applied_by])
+
+    __table_args__ = (
+        Index("idx_verification_handoff_proposal_id", "proposal_id"),
+        Index("idx_verification_handoff_application_id", "application_id"),
+        Index("idx_verification_handoff_workspace_id", "workspace_id"),
+        Index("idx_verification_handoff_finding_id", "finding_id"),
+        Index("idx_verification_handoff_status", "status"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<RemediationVerificationHandoff(proposal_id={self.proposal_id}, status={self.status})>"

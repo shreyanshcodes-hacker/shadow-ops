@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from typing import Optional, Dict, Any
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import Column, BigInteger, UUID as PGUUID, ForeignKey, Text, DateTime, JSON, Index
+from sqlalchemy import Column, BigInteger, UUID as PGUUID, ForeignKey, Text, DateTime, JSON, Index, func
 from sqlalchemy.orm import Mapped, mapped_column
 from fastapi import Request
 
@@ -24,7 +24,7 @@ class AuditLog(Base):
     ip_address: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     user_agent: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     request_id: Mapped[uuid.UUID] = mapped_column(PGUUID(as_uuid=True), default=uuid.uuid4, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=datetime.utcnow, nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
 
     __table_args__ = (
         Index("idx_audit_logs_ws_id_created", "workspace_id", "created_at"),

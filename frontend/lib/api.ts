@@ -400,16 +400,61 @@ class ApiClient {
   }
 
   // Remediation
-  async listRemediations(workspaceId: string): Promise<RemediationProposal[]> {
-    return this.get(`/workspaces/${workspaceId}/remediations`);
+  async listRemediations(workspaceId: string, params?: Record<string, string>): Promise<RemediationProposal[]> {
+    const query = params ? `?${new URLSearchParams(params).toString()}` : '';
+    return this.get(`/remediations${query}`);
   }
 
-  async generateRemediation(workspaceId: string, findingId: string): Promise<RemediationProposal> {
-    return this.post(`/workspaces/${workspaceId}/findings/${findingId}/remediation`, {});
+  async generateRemediation(findingId: string): Promise<RemediationProposal> {
+    return this.post(`/remediations/findings/${findingId}/remediations`, {});
   }
 
-  async approveRemediation(workspaceId: string, remediationId: string, data: ApproveRemediationRequest): Promise<RemediationApproval> {
-    return this.post(`/workspaces/${workspaceId}/remediations/${remediationId}/approve`, data);
+  async getRemediation(proposalId: string): Promise<RemediationDetailResponse> {
+    return this.get(`/remediations/${proposalId}`);
+  }
+
+  async validateRemediation(proposalId: string): Promise<ValidationRun[]> {
+    return this.post(`/remediations/${proposalId}/validate`, {});
+  }
+
+  async getValidations(proposalId: string): Promise<ValidationRun[]> {
+    return this.get(`/remediations/${proposalId}/validations`);
+  }
+
+  async approveRemediation(proposalId: string, data: ApproveRemediationRequest): Promise<RemediationApproval> {
+    return this.post(`/remediations/${proposalId}/approve`, data);
+  }
+
+  async rejectRemediation(proposalId: string, data: RejectRemediationRequest): Promise<RemediationApproval> {
+    return this.post(`/remediations/${proposalId}/reject`, data);
+  }
+
+  async getApprovals(proposalId: string): Promise<RemediationApproval[]> {
+    return this.get(`/remediations/${proposalId}/approvals`);
+  }
+
+  async applyRemediation(proposalId: string, data: ApplyRemediationRequest): Promise<RemediationApplication> {
+    return this.post(`/remediations/${proposalId}/apply`, data);
+  }
+
+  async getApplications(proposalId: string): Promise<RemediationApplication[]> {
+    return this.get(`/remediations/${proposalId}/applications`);
+  }
+
+  async rollbackRemediation(proposalId: string, data: RollbackRemediationRequest): Promise<RemediationRollback> {
+    return this.post(`/remediations/${proposalId}/rollback`, data);
+  }
+
+  async getRollbacks(proposalId: string): Promise<RemediationRollback[]> {
+    return this.get(`/remediations/${proposalId}/rollbacks`);
+  }
+
+  async getRollbackStatus(applicationId: string): Promise<RollbackStatusResponse> {
+    return this.get(`/remediations/applications/${applicationId}/rollback-status`);
+  }
+
+  async requestVerification(applicationId: string): Promise<{ message: string; handoff_id: string }> {
+    return this.post(`/remediations/applications/${applicationId}/request-verification`, {});
   }
 
   // Reports
@@ -1081,4 +1126,275 @@ export interface SecurityTeamReviewResponse {
   reviewed_at: string;
   notes: string | null;
   created_at: string;
+}
+
+// Remediation Types
+export type RemediationStatus = 
+  | 'DRAFT' 
+  | 'GENERATING' 
+  | 'PROPOSED' 
+  | 'VALIDATING' 
+  | 'VALIDATION_FAILED' 
+  | 'AWAITING_APPROVAL' 
+  | 'APPROVED' 
+  | 'APPLYING' 
+  | 'APPLIED' 
+  | 'REJECTED' 
+  | 'EXPIRED' 
+  | 'ROLLED_BACK' 
+  | 'FAILED';
+
+export type RemediationFixType = 
+  | 'code_change' 
+  | 'config_change' 
+  | 'dependency_update' 
+  | 'infrastructure_change' 
+  | 'waf_rule' 
+  | 'network_policy' 
+  | 'secret_rotation';
+
+export type ValidationStatus = 'PENDING' | 'RUNNING' | 'PASSED' | 'FAILED' | 'BLOCKED' | 'ERROR';
+export type ValidationCheckType = 
+  | 'patch_integrity' 
+  | 'diff_parsing' 
+  | 'path_allowlist' 
+  | 'syntax_validation' 
+  | 'semgrep_rescan' 
+  | 'regression_check' 
+  | 'existing_tests';
+
+export type ApplicationStatus = 'PENDING' | 'CHECKPOINT_CREATED' | 'PATCH_APPLIED' | 'VERIFIED' | 'FAILED' | 'ROLLED_BACK';
+export type RollbackStatus = 'PENDING' | 'IN_PROGRESS' | 'COMPLETED' | 'FAILED' | 'BLOCKED_DIVERGED';
+export type VerificationHandoffStatus = 
+  | 'PENDING_VERIFICATION' 
+  | 'VERIFICATION_REQUESTED' 
+  | 'VERIFIED' 
+  | 'VERIFICATION_FAILED' 
+  | 'MANUAL_REVIEW_REQUIRED';
+
+export interface AffectedFile {
+  file_path: string;
+  language?: string;
+  change_type: string;
+}
+
+export interface SuggestedTest {
+  test_type: string;
+  description: string;
+  command?: string;
+}
+
+export interface FileChange {
+  file_path: string;
+  old_hash?: string;
+  new_hash?: string;
+  additions: number;
+  deletions: number;
+}
+
+export interface RemediationProposal {
+  id: string;
+  workspace_id: string;
+  asset_id: string;
+  finding_id: string;
+  source_scan_id: string;
+  proposal_title: string;
+  problem_summary: string;
+  proposed_solution: string;
+  rationale: string;
+  affected_files: AffectedFile[];
+  patch_reference?: string;
+  validation_results: Record<string, unknown>;
+  fix_type: RemediationFixType;
+  expected_security_benefit?: string;
+  compatibility_risks?: string;
+  assumptions?: string;
+  limitations?: string;
+  suggested_tests: SuggestedTest[];
+  status: RemediationStatus;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+  approved_by?: string;
+  approved_at?: string;
+  applied_by?: string;
+  applied_at?: string;
+  failure_reason?: string;
+  version: number;
+  expires_at?: string;
+  finding?: Finding;
+  asset?: Asset;
+}
+
+export interface RemediationProposalListItem {
+  id: string;
+  workspace_id: string;
+  asset_id: string;
+  finding_id: string;
+  source_scan_id: string;
+  proposal_title: string;
+  status: RemediationStatus;
+  fix_type: RemediationFixType;
+  created_by: string;
+  created_at: string;
+  approved_at?: string;
+  applied_at?: string;
+}
+
+export interface PatchVersion {
+  id: string;
+  proposal_id: string;
+  workspace_id: string;
+  version: number;
+  unified_diff: string;
+  file_changes: FileChange[];
+  patch_hash: string;
+  base_revision?: string;
+  created_by: string;
+  created_at: string;
+  is_current: boolean;
+  superseded_by?: string;
+}
+
+export interface ValidationRun {
+  id: string;
+  proposal_id: string;
+  patch_version_id: string;
+  workspace_id: string;
+  status: ValidationStatus;
+  check_type: ValidationCheckType;
+  command?: string;
+  exit_code?: number;
+  stdout?: string;
+  stderr?: string;
+  duration_ms?: number;
+  started_at?: string;
+  completed_at?: string;
+  error_message?: string;
+  metadata: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface RemediationApproval {
+  id: string;
+  proposal_id: string;
+  patch_version_id: string;
+  workspace_id: string;
+  approved_by: string;
+  decision: 'approved' | 'rejected';
+  justification?: string;
+  conditions: string[];
+  patch_hash: string;
+  proposal_version: number;
+  validation_snapshot: Record<string, unknown>;
+  approved_at: string;
+  expires_at?: string;
+  approver?: UserProfile;
+}
+
+export interface RemediationApplication {
+  id: string;
+  proposal_id: string;
+  patch_version_id: string;
+  approval_id: string;
+  workspace_id: string;
+  asset_id: string;
+  status: ApplicationStatus;
+  target_revision: string;
+  checkpoint_ref?: string;
+  applied_by: string;
+  applied_at: string;
+  completed_at?: string;
+  result_diff?: string;
+  changed_files: FileChange[];
+  validation_results: Record<string, unknown>;
+  failure_reason?: string;
+  applier?: UserProfile;
+}
+
+export interface RemediationRollback {
+  id: string;
+  proposal_id: string;
+  application_id: string;
+  workspace_id: string;
+  asset_id: string;
+  status: RollbackStatus;
+  requested_by: string;
+  reason: string;
+  checkpoint_ref: string;
+  verification_diff?: string;
+  started_at: string;
+  completed_at?: string;
+  failure_reason?: string;
+  requester?: UserProfile;
+}
+
+export interface RemediationVerificationHandoff {
+  id: string;
+  proposal_id: string;
+  application_id: string;
+  workspace_id: string;
+  finding_id: string;
+  asset_id: string;
+  patch_hash: string;
+  repository_revision: string;
+  changed_files: FileChange[];
+  validation_results: Record<string, unknown>;
+  original_finding_snapshot: Record<string, unknown>;
+  applied_at: string;
+  applied_by: string;
+  verification_requested: boolean;
+  verification_requested_at?: string;
+  verification_completed_at?: string;
+  verification_result?: Record<string, unknown>;
+  status: VerificationHandoffStatus;
+  finding?: Finding;
+  asset?: Asset;
+}
+
+export interface RemediationDetailResponse {
+  proposal: RemediationProposal;
+  patch_versions: PatchVersion[];
+  validations: ValidationRun[];
+  approvals: RemediationApproval[];
+  applications: RemediationApplication[];
+  rollbacks: RemediationRollback[];
+  verification_handoff?: RemediationVerificationHandoff;
+}
+
+export interface ApproveRemediationRequest {
+  proposal_id: string;
+  patch_version_id: string;
+  justification?: string;
+  conditions?: string[];
+}
+
+export interface RejectRemediationRequest {
+  proposal_id: string;
+  patch_version_id: string;
+  justification: string;
+}
+
+export interface ApplyRemediationRequest {
+  proposal_id: string;
+  patch_version_id: string;
+  approval_id: string;
+  idempotency_key: string;
+}
+
+export interface RollbackRemediationRequest {
+  application_id: string;
+  reason: string;
+}
+
+export interface ValidateRemediationRequest {
+  proposal_id: string;
+}
+
+export interface RollbackStatusResponse {
+  available: boolean;
+  reason?: string;
+  checkpoint_ref?: string;
+  target_revision?: string;
+  requires_manual_recovery?: boolean;
 }

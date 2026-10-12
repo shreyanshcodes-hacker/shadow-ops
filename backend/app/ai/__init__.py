@@ -35,22 +35,21 @@ GrokProvider = None  # type: ignore
 
 from app.ai.manager import AIManager, AIManagerError
 from app.ai.schemas import (
-    FindingAnalysis,
+    SecurityAnalysis as FindingAnalysis,
     ScanAnalysis,
-    FindingClassification,
     EvidenceCertainty,
     SupportingEvidenceRef,
 )
 from app.ai.prompts import (
-    FINDING_ANALYSIS_SYSTEM_PROMPT,
-    FINDING_ANALYSIS_USER_PROMPT_TEMPLATE,
+    SECURITY_FINDING_ANALYSIS_SYSTEM_PROMPT as FINDING_ANALYSIS_SYSTEM_PROMPT,
+    SECURITY_FINDING_ANALYSIS_USER_PROMPT_TEMPLATE as FINDING_ANALYSIS_USER_PROMPT_TEMPLATE,
     SCAN_ANALYSIS_SYSTEM_PROMPT,
     SCAN_ANALYSIS_USER_PROMPT_TEMPLATE,
     build_finding_analysis_prompt,
     build_scan_analysis_prompt,
 )
 from app.ai.validation import (
-    validate_finding_analysis,
+    validate_security_analysis as validate_finding_analysis,
     validate_scan_analysis,
     sanitize_analysis_output,
     AIValidationError,
