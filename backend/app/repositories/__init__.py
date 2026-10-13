@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update, delete, func, and_, or_
 from sqlalchemy.orm import selectinload
 
-from app.models import Profile, Workspace, WorkspaceMember, Asset, AssetAuthorization, WorkspaceRole, AuthorizationStatus, Scan, ScanEvent, Finding, FindingEvidence, ScanTarget, ScanStatus, ScanProfile, ScanEventType, FindingSource, FindingSeverity, FindingConfidence, FindingStatus, FindingEvidenceType, AiRun, FindingAiAnalysis, AiProviderType, AiOperationType, AiRunStatus, FindingRelationship, RelationshipType, RelationshipSource, AttackPath, AttackPathStatus, AttackPathNode, AttackPathNodeType, AttackPathEdge, RiskSnapshot, SecurityTeamRun, SecurityTeamRunStatus, AgentRun, AgentName, AgentRunStatus, TeamAssessment, TeamReview, RemediationProposal, RemediationStatus, PatchVersion, ValidationRun, ValidationStatus, ValidationCheckType, RemediationApproval, RemediationApplication, ApplicationStatus, RemediationRollback, RollbackStatus, RemediationVerificationHandoff, VerificationHandoffStatus, RemediationFixType
+from app.models import Profile, Workspace, WorkspaceMember, Asset, AssetAuthorization, WorkspaceRole, AuthorizationStatus, Scan, ScanEvent, Finding, FindingEvidence, ScanTarget, ScanStatus, ScanProfile, ScanEventType, FindingSource, FindingSeverity, FindingConfidence, FindingStatus, FindingEvidenceType, AiRun, FindingAiAnalysis, AiProviderType, AiOperationType, AiRunStatus, FindingRelationship, RelationshipType, RelationshipSource, AttackPath, AttackPathStatus, AttackPathNode, AttackPathNodeType, AttackPathEdge, RiskSnapshot, SecurityTeamRun, SecurityTeamRunStatus, AgentRun, AgentName, AgentRunStatus, TeamAssessment, TeamReview, RemediationProposal, RemediationStatus, PatchVersion, ValidationRun, ValidationStatus, ValidationCheckType, RemediationApproval, RemediationApplication, ApplicationStatus, RemediationRollback, RollbackStatus, RemediationVerificationHandoff, VerificationHandoffStatus, RemediationFixType, VerificationJob, VerificationStatus, VerificationBaseline, VerificationCheck, CheckType, CheckStatus, EvidenceComparison, ComparisonCategory, VerificationPolicy, VerificationReview, ReviewDecision
 
 
 class ProfileRepository:
@@ -1166,5 +1166,247 @@ class RemediationVerificationHandoffRepository:
     async def get_by_application(self, application_id: UUID) -> Optional[RemediationVerificationHandoff]:
         result = await self.db.execute(
             select(RemediationVerificationHandoff).where(RemediationVerificationHandoff.application_id == application_id)
+        )
+        return result.scalar_one_or_none()
+
+
+class VerificationJobRepository:
+    def __init__(self, db: AsyncSession):
+        self.db = db
+
+    async def create(self, job: VerificationJob) -> VerificationJob:
+        self.db.add(job)
+        await self.db.flush()
+        await self.db.refresh(job)
+        return job
+
+    async def get_by_id(self, job_id: UUID) -> Optional[VerificationJob]:
+        result = await self.db.execute(select(VerificationJob).where(VerificationJob.id == job_id))
+        return result.scalar_one_or_none()
+
+    async def get_by_id_with_relations(self, job_id: UUID) -> Optional[VerificationJob]:
+        result = await self.db.execute(
+            select(VerificationJob)
+            .options(
+                selectinload(VerificationJob.baselines),
+                selectinload(VerificationJob.checks),
+                selectinload(VerificationJob.comparisons),
+                selectinload(VerificationJob.reviews),
+            )
+            .where(VerificationJob.id == job_id)
+        )
+        return result.scalar_one_or_none()
+
+    async def get_by_workspace(
+        self,
+        workspace_id: UUID,
+        status: Optional[VerificationStatus] = None,
+        finding_id: Optional[UUID] = None,
+        proposal_id: Optional[UUID] = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> List[VerificationJob]:
+        query = select(VerificationJob).where(VerificationJob.workspace_id == workspace_id).order_by(VerificationJob.created_at.desc()).limit(limit).offset(offset)
+        if status:
+            query = query.where(VerificationJob.status == status)
+        if finding_id:
+            query = query.where(VerificationJob.finding_id == finding_id)
+        if proposal_id:
+            query = query.where(VerificationJob.remediation_proposal_id == proposal_id)
+        result = await self.db.execute(query)
+        return list(result.scalars().all())
+
+    async def get_by_idempotency_key(self, idempotency_key: str) -> Optional[VerificationJob]:
+        result = await self.db.execute(select(VerificationJob).where(VerificationJob.idempotency_key == idempotency_key))
+        return result.scalar_one_or_none()
+
+    async def update(self, job_id: UUID, data: Dict[str, Any]) -> Optional[VerificationJob]:
+        result = await self.db.execute(
+            update(VerificationJob).where(VerificationJob.id == job_id).values(**data).returning(VerificationJob)
+        )
+        return result.scalar_one_or_none()
+
+    async def count_by_workspace(self, workspace_id: UUID, status: Optional[VerificationStatus] = None) -> int:
+        query = select(func.count(VerificationJob.id)).where(VerificationJob.workspace_id == workspace_id)
+        if status:
+            query = query.where(VerificationJob.status == status)
+        result = await self.db.execute(query)
+        return result.scalar_one()
+
+
+class VerificationBaselineRepository:
+    def __init__(self, db: AsyncSession):
+        self.db = db
+
+    async def create(self, baseline: VerificationBaseline) -> VerificationBaseline:
+        self.db.add(baseline)
+        await self.db.flush()
+        await self.db.refresh(baseline)
+        return baseline
+
+    async def get_by_id(self, baseline_id: UUID) -> Optional[VerificationBaseline]:
+        result = await self.db.execute(select(VerificationBaseline).where(VerificationBaseline.id == baseline_id))
+        return result.scalar_one_or_none()
+
+    async def get_by_job(self, job_id: UUID) -> Optional[VerificationBaseline]:
+        result = await self.db.execute(
+            select(VerificationBaseline).where(VerificationBaseline.verification_job_id == job_id)
+        )
+        return result.scalar_one_or_none()
+
+    async def get_by_fingerprint(self, fingerprint: str) -> List[VerificationBaseline]:
+        result = await self.db.execute(
+            select(VerificationBaseline).where(VerificationBaseline.finding_fingerprint == fingerprint)
+        )
+        return list(result.scalars().all())
+
+
+class VerificationCheckRepository:
+    def __init__(self, db: AsyncSession):
+        self.db = db
+
+    async def create(self, check: VerificationCheck) -> VerificationCheck:
+        self.db.add(check)
+        await self.db.flush()
+        await self.db.refresh(check)
+        return check
+
+    async def get_by_id(self, check_id: UUID) -> Optional[VerificationCheck]:
+        result = await self.db.execute(select(VerificationCheck).where(VerificationCheck.id == check_id))
+        return result.scalar_one_or_none()
+
+    async def get_by_job(self, job_id: UUID) -> List[VerificationCheck]:
+        result = await self.db.execute(
+            select(VerificationCheck).where(VerificationCheck.verification_job_id == job_id).order_by(VerificationCheck.created_at.asc())
+        )
+        return list(result.scalars().all())
+
+    async def get_by_job_and_type(self, job_id: UUID, check_type: CheckType) -> List[VerificationCheck]:
+        result = await self.db.execute(
+            select(VerificationCheck).where(
+                VerificationCheck.verification_job_id == job_id,
+                VerificationCheck.check_type == check_type
+            ).order_by(VerificationCheck.created_at.asc())
+        )
+        return list(result.scalars().all())
+
+    async def update(self, check_id: UUID, data: Dict[str, Any]) -> Optional[VerificationCheck]:
+        result = await self.db.execute(
+            update(VerificationCheck).where(VerificationCheck.id == check_id).values(**data).returning(VerificationCheck)
+        )
+        return result.scalar_one_or_none()
+
+
+class EvidenceComparisonRepository:
+    def __init__(self, db: AsyncSession):
+        self.db = db
+
+    async def create(self, comparison: EvidenceComparison) -> EvidenceComparison:
+        self.db.add(comparison)
+        await self.db.flush()
+        await self.db.refresh(comparison)
+        return comparison
+
+    async def create_many(self, comparisons: List[EvidenceComparison]) -> List[EvidenceComparison]:
+        for comp in comparisons:
+            self.db.add(comp)
+        await self.db.flush()
+        for comp in comparisons:
+            await self.db.refresh(comp)
+        return comparisons
+
+    async def get_by_id(self, comparison_id: UUID) -> Optional[EvidenceComparison]:
+        result = await self.db.execute(select(EvidenceComparison).where(EvidenceComparison.id == comparison_id))
+        return result.scalar_one_or_none()
+
+    async def get_by_job(self, job_id: UUID) -> List[EvidenceComparison]:
+        result = await self.db.execute(
+            select(EvidenceComparison).where(EvidenceComparison.verification_job_id == job_id).order_by(EvidenceComparison.created_at.asc())
+        )
+        return list(result.scalars().all())
+
+    async def get_by_category(self, job_id: UUID, category: ComparisonCategory) -> List[EvidenceComparison]:
+        result = await self.db.execute(
+            select(EvidenceComparison).where(
+                EvidenceComparison.verification_job_id == job_id,
+                EvidenceComparison.category == category
+            ).order_by(EvidenceComparison.created_at.asc())
+        )
+        return list(result.scalars().all())
+
+    async def get_by_baseline_fingerprint(self, job_id: UUID, fingerprint: str) -> List[EvidenceComparison]:
+        result = await self.db.execute(
+            select(EvidenceComparison).where(
+                EvidenceComparison.verification_job_id == job_id,
+                EvidenceComparison.baseline_fingerprint == fingerprint
+            )
+        )
+        return list(result.scalars().all())
+
+
+class VerificationPolicyRepository:
+    def __init__(self, db: AsyncSession):
+        self.db = db
+
+    async def create(self, policy: VerificationPolicy) -> VerificationPolicy:
+        self.db.add(policy)
+        await self.db.flush()
+        await self.db.refresh(policy)
+        return policy
+
+    async def get_by_id(self, policy_id: UUID) -> Optional[VerificationPolicy]:
+        result = await self.db.execute(select(VerificationPolicy).where(VerificationPolicy.id == policy_id))
+        return result.scalar_one_or_none()
+
+    async def get_by_version(self, version: str) -> Optional[VerificationPolicy]:
+        result = await self.db.execute(select(VerificationPolicy).where(VerificationPolicy.version == version))
+        return result.scalar_one_or_none()
+
+    async def get_active(self) -> Optional[VerificationPolicy]:
+        result = await self.db.execute(select(VerificationPolicy).where(VerificationPolicy.is_active == True).limit(1))
+        return result.scalar_one_or_none()
+
+    async def list_all(self, limit: int = 50, offset: int = 0) -> List[VerificationPolicy]:
+        result = await self.db.execute(
+            select(VerificationPolicy).order_by(VerificationPolicy.created_at.desc()).limit(limit).offset(offset)
+        )
+        return list(result.scalars().all())
+
+    async def update(self, policy_id: UUID, data: Dict[str, Any]) -> Optional[VerificationPolicy]:
+        result = await self.db.execute(
+            update(VerificationPolicy).where(VerificationPolicy.id == policy_id).values(**data).returning(VerificationPolicy)
+        )
+        return result.scalar_one_or_none()
+
+    async def set_active(self, version: str) -> None:
+        await self.db.execute(update(VerificationPolicy).values(is_active=False))
+        await self.db.execute(
+            update(VerificationPolicy).where(VerificationPolicy.version == version).values(is_active=True)
+        )
+
+
+class VerificationReviewRepository:
+    def __init__(self, db: AsyncSession):
+        self.db = db
+
+    async def create(self, review: VerificationReview) -> VerificationReview:
+        self.db.add(review)
+        await self.db.flush()
+        await self.db.refresh(review)
+        return review
+
+    async def get_by_id(self, review_id: UUID) -> Optional[VerificationReview]:
+        result = await self.db.execute(select(VerificationReview).where(VerificationReview.id == review_id))
+        return result.scalar_one_or_none()
+
+    async def get_by_job(self, job_id: UUID) -> List[VerificationReview]:
+        result = await self.db.execute(
+            select(VerificationReview).where(VerificationReview.verification_job_id == job_id).order_by(VerificationReview.reviewed_at.desc())
+        )
+        return list(result.scalars().all())
+
+    async def get_latest_by_job(self, job_id: UUID) -> Optional[VerificationReview]:
+        result = await self.db.execute(
+            select(VerificationReview).where(VerificationReview.verification_job_id == job_id).order_by(VerificationReview.reviewed_at.desc()).limit(1)
         )
         return result.scalar_one_or_none()

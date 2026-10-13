@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from app.api.v1 import health, auth, workspaces, assets, auth as auth_routes, scans, ai, findings, attack_paths, security_team, remediations
+from app.api.v1 import health, auth, workspaces, assets, auth as auth_routes, scans, ai, findings, attack_paths, security_team, remediations, verifications
 
 api_router = APIRouter()
 
@@ -15,3 +15,4 @@ api_router.include_router(findings.router, prefix="/findings", tags=["findings"]
 api_router.include_router(attack_paths.router, prefix="/attack-paths", tags=["attack-paths"])
 api_router.include_router(security_team.router, prefix="/security-team", tags=["security-team"])
 api_router.include_router(remediations.router, prefix="/remediations", tags=["remediations"])
+api_router.include_router(verifications.router, prefix="/verifications", tags=["verifications"])

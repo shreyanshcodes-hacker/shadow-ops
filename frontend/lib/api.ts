@@ -413,6 +413,44 @@ class ApiClient {
     return this.get(`/remediations/${proposalId}`);
   }
 
+  // Verification
+  async listVerifications(workspaceId: string, params?: Record<string, string>): Promise<VerificationJobListItem[]> {
+    const query = params ? `?${new URLSearchParams(params).toString()}` : '';
+    return this.get(`/verifications${query}`);
+  }
+
+  async startVerification(data: StartVerificationRequest): Promise<VerificationJob> {
+    return this.post('/verifications/start', data);
+  }
+
+  async getVerification(jobId: string): Promise<VerificationJob> {
+    return this.get(`/verifications/${jobId}`);
+  }
+
+  async getVerificationDetail(jobId: string): Promise<VerificationDetailResponse> {
+    return this.get(`/verifications/${jobId}/detail`);
+  }
+
+  async submitVerificationReview(data: VerificationReviewRequest): Promise<VerificationJob> {
+    return this.post(`/verifications/${data.verification_job_id}/review`, data);
+  }
+
+  async rerunVerification(data: RerunVerificationRequest): Promise<VerificationJob> {
+    return this.post(`/verifications/${data.verification_job_id}/rerun`, data);
+  }
+
+  async cancelVerification(jobId: string): Promise<VerificationJob> {
+    return this.post(`/verifications/${jobId}/cancel`, {});
+  }
+
+  async listVerificationPolicies(): Promise<VerificationPolicy[]> {
+    return this.get('/verifications/policies');
+  }
+
+  async createVerificationPolicy(data: VerificationPolicyCreate): Promise<VerificationPolicy> {
+    return this.post('/verifications/policies', data);
+  }
+
   async validateRemediation(proposalId: string): Promise<ValidationRun[]> {
     return this.post(`/remediations/${proposalId}/validate`, {});
   }
@@ -1397,4 +1435,218 @@ export interface RollbackStatusResponse {
   checkpoint_ref?: string;
   target_revision?: string;
   requires_manual_recovery?: boolean;
+}
+
+// Verification Types
+export type VerificationStatus = 
+  | 'QUEUED' 
+  | 'RUNNING' 
+  | 'BASELINE_CHECK' 
+  | 'RESCANNING' 
+  | 'REGRESSION_CHECK' 
+  | 'COMPARING_EVIDENCE' 
+  | 'PASSED_PENDING_REVIEW' 
+  | 'VERIFIED' 
+  | 'FAILED' 
+  | 'INCONCLUSIVE' 
+  | 'BLOCKED' 
+  | 'CANCELED';
+
+export type VerificationOutcome = 
+  | 'VERIFIED_CANDIDATE' 
+  | 'FAILED' 
+  | 'INCONCLUSIVE' 
+  | 'BLOCKED';
+
+export type CheckStatus = 'PENDING' | 'RUNNING' | 'PASSED' | 'FAILED' | 'SKIPPED' | 'BLOCKED' | 'ERROR';
+export type CheckType = 
+  | 'ORIGINAL_VULNERABILITY' 
+  | 'REGRESSION_ANALYSIS' 
+  | 'SCANNER_EXECUTION' 
+  | 'TEST_EXECUTION' 
+  | 'EVIDENCE_COMPARISON';
+
+export type ComparisonCategory = 
+  | 'STILL_PRESENT' 
+  | 'NO_LONGER_DETECTED' 
+  | 'MODIFIED_OR_MOVED' 
+  | 'POSSIBLE_REGRESSION' 
+  | 'NEW_FINDING' 
+  | 'UNCOMPARABLE';
+
+export type ReviewDecision = 'accept' | 'reject' | 'rerun_requested';
+
+export interface VerificationJob {
+  id: string;
+  workspace_id: string;
+  asset_id: string;
+  finding_id: string;
+  remediation_proposal_id: string;
+  remediation_application_id: string;
+  patch_hash: string;
+  source_revision: string;
+  target_revision: string;
+  verification_engine_version: string;
+  policy_version: string;
+  status: VerificationStatus;
+  overall_outcome?: VerificationOutcome;
+  original_vulnerability_outcome?: CheckStatus;
+  regression_analysis_outcome?: CheckStatus;
+  scanner_execution_outcome?: CheckStatus;
+  test_execution_outcome?: CheckStatus;
+  evidence_comparison_outcome?: CheckStatus;
+  requested_by: string;
+  started_at?: string;
+  completed_at?: string;
+  failed_at?: string;
+  canceled_at?: string;
+  error_code?: string;
+  error_message?: string;
+  created_at: string;
+  updated_at: string;
+  finding?: Finding;
+  asset?: Asset;
+}
+
+export interface VerificationJobListItem {
+  id: string;
+  workspace_id: string;
+  asset_id: string;
+  finding_id: string;
+  remediation_proposal_id: string;
+  remediation_application_id: string;
+  patch_hash: string;
+  status: VerificationStatus;
+  overall_outcome?: VerificationOutcome;
+  requested_by: string;
+  created_at: string;
+  completed_at?: string;
+}
+
+export interface VerificationBaseline {
+  id: string;
+  verification_job_id: string;
+  workspace_id: string;
+  finding_id: string;
+  original_finding_snapshot: Record<string, unknown>;
+  original_evidence: Record<string, unknown>[];
+  scanner_version: string;
+  scanner_config: Record<string, unknown>;
+  rule_ids: string[];
+  finding_fingerprint: string;
+  evidence_hashes: string[];
+  repository_revision: string;
+  scan_id?: string;
+  pre_patch_scan_results?: Record<string, unknown>;
+  capture_method: string;
+  captured_at: string;
+  captured_by: string;
+  finding?: Finding;
+  scan?: ScanListResponse;
+}
+
+export interface VerificationCheck {
+  id: string;
+  verification_job_id: string;
+  workspace_id: string;
+  check_type: CheckType;
+  check_name: string;
+  check_version?: string;
+  status: CheckStatus;
+  command?: string;
+  exit_code?: number;
+  stdout?: string;
+  stderr?: string;
+  duration_ms?: number;
+  started_at?: string;
+  completed_at?: string;
+  error_message?: string;
+  metadata: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface EvidenceComparison {
+  id: string;
+  verification_job_id: string;
+  workspace_id: string;
+  baseline_finding_id?: string;
+  post_patch_finding_id?: string;
+  baseline_fingerprint: string;
+  post_patch_fingerprint?: string;
+  scanner_rule_id: string;
+  normalized_file_path: string;
+  baseline_location?: Record<string, unknown>;
+  post_patch_location?: Record<string, unknown>;
+  baseline_evidence_hash: string;
+  post_patch_evidence_hash?: string;
+  category: ComparisonCategory;
+  match_confidence?: number;
+  match_rationale?: string;
+  relationship_to_original?: string;
+  created_at: string;
+  baseline_finding?: Finding;
+  post_patch_finding?: Finding;
+}
+
+export interface VerificationPolicy {
+  id: string;
+  version: string;
+  name: string;
+  description?: string;
+  policy_config: Record<string, unknown>;
+  is_active: boolean;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface VerificationReview {
+  id: string;
+  verification_job_id: string;
+  workspace_id: string;
+  reviewed_by: string;
+  decision: ReviewDecision;
+  justification: string;
+  notes?: string;
+  policy_version: string;
+  baseline_snapshot: Record<string, unknown>;
+  comparison_snapshot: Record<string, unknown>;
+  check_results_snapshot: Record<string, unknown>;
+  reviewed_at: string;
+  created_at: string;
+  reviewer?: UserProfile;
+}
+
+export interface VerificationDetailResponse {
+  job: VerificationJob;
+  baseline?: VerificationBaseline;
+  checks: VerificationCheck[];
+  comparisons: EvidenceComparison[];
+  reviews: VerificationReview[];
+  policy?: VerificationPolicy;
+}
+
+export interface StartVerificationRequest {
+  remediation_application_id: string;
+  idempotency_key: string;
+}
+
+export interface VerificationReviewRequest {
+  verification_job_id: string;
+  decision: ReviewDecision;
+  justification: string;
+  notes?: string;
+}
+
+export interface RerunVerificationRequest {
+  verification_job_id: string;
+  idempotency_key: string;
+}
+
+export interface VerificationPolicyCreate {
+  version: string;
+  name: string;
+  description?: string;
+  policy_config: Record<string, unknown>;
+  is_active?: boolean;
 }

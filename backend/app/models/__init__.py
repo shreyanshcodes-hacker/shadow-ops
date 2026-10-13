@@ -1299,3 +1299,288 @@ class RemediationVerificationHandoff(Base):
 
     def __repr__(self) -> str:
         return f"<RemediationVerificationHandoff(proposal_id={self.proposal_id}, status={self.status})>"
+
+
+class VerificationStatus(str, enum.Enum):
+    QUEUED = "QUEUED"
+    RUNNING = "RUNNING"
+    BASELINE_CHECK = "BASELINE_CHECK"
+    RESCANNING = "RESCANNING"
+    REGRESSION_CHECK = "REGRESSION_CHECK"
+    COMPARING_EVIDENCE = "COMPARING_EVIDENCE"
+    PASSED_PENDING_REVIEW = "PASSED_PENDING_REVIEW"
+    VERIFIED = "VERIFIED"
+    FAILED = "FAILED"
+    INCONCLUSIVE = "INCONCLUSIVE"
+    BLOCKED = "BLOCKED"
+    CANCELED = "CANCELED"
+
+
+class VerificationOutcome(str, enum.Enum):
+    VERIFIED_CANDIDATE = "VERIFIED_CANDIDATE"
+    FAILED = "FAILED"
+    INCONCLUSIVE = "INCONCLUSIVE"
+    BLOCKED = "BLOCKED"
+
+
+class CheckStatus(str, enum.Enum):
+    PENDING = "PENDING"
+    RUNNING = "RUNNING"
+    PASSED = "PASSED"
+    FAILED = "FAILED"
+    SKIPPED = "SKIPPED"
+    BLOCKED = "BLOCKED"
+    ERROR = "ERROR"
+
+
+class CheckType(str, enum.Enum):
+    ORIGINAL_VULNERABILITY = "original_vulnerability"
+    REGRESSION_ANALYSIS = "regression_analysis"
+    SCANNER_EXECUTION = "scanner_execution"
+    TEST_EXECUTION = "test_execution"
+    EVIDENCE_COMPARISON = "evidence_comparison"
+
+
+class ComparisonCategory(str, enum.Enum):
+    STILL_PRESENT = "STILL_PRESENT"
+    NO_LONGER_DETECTED = "NO_LONGER_DETECTED"
+    MODIFIED_OR_MOVED = "MODIFIED_OR_MOVED"
+    POSSIBLE_REGRESSION = "POSSIBLE_REGRESSION"
+    NEW_FINDING = "NEW_FINDING"
+    UNCOMPARABLE = "UNCOMPARABLE"
+
+
+class ReviewDecision(str, enum.Enum):
+    ACCEPT = "accept"
+    REJECT = "reject"
+    RERUN_REQUESTED = "rerun_requested"
+
+
+class VerificationJob(Base):
+    __tablename__ = "verification_jobs"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False, index=True)
+    asset_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("assets.id", ondelete="CASCADE"), nullable=False, index=True)
+    finding_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("findings.id", ondelete="CASCADE"), nullable=False, index=True)
+    remediation_proposal_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("remediation_proposals.id", ondelete="CASCADE"), nullable=False, index=True)
+    remediation_application_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("remediation_applications.id", ondelete="CASCADE"), nullable=False, index=True)
+    patch_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    source_revision: Mapped[str] = mapped_column(Text, nullable=False)
+    target_revision: Mapped[str] = mapped_column(Text, nullable=False)
+    verification_engine_version: Mapped[str] = mapped_column(Text, default="verification-v1", nullable=False)
+    policy_version: Mapped[str] = mapped_column(Text, default="verification-policy-v1", nullable=False)
+    status: Mapped[VerificationStatus] = mapped_column(SQLEnum(VerificationStatus), default=VerificationStatus.QUEUED, nullable=False, index=True)
+    overall_outcome: Mapped[Optional[VerificationOutcome]] = mapped_column(SQLEnum(VerificationOutcome), nullable=True, index=True)
+    original_vulnerability_outcome: Mapped[Optional[CheckStatus]] = mapped_column(SQLEnum(CheckStatus), nullable=True)
+    regression_analysis_outcome: Mapped[Optional[CheckStatus]] = mapped_column(SQLEnum(CheckStatus), nullable=True)
+    scanner_execution_outcome: Mapped[Optional[CheckStatus]] = mapped_column(SQLEnum(CheckStatus), nullable=True)
+    test_execution_outcome: Mapped[Optional[CheckStatus]] = mapped_column(SQLEnum(CheckStatus), nullable=True)
+    evidence_comparison_outcome: Mapped[Optional[CheckStatus]] = mapped_column(SQLEnum(CheckStatus), nullable=True)
+    requested_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("profiles.id", ondelete="RESTRICT"), nullable=False)
+    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    failed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    canceled_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    error_code: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    idempotency_key: Mapped[str] = mapped_column(Text, nullable=False, unique=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    # Relationships
+    workspace: Mapped["Workspace"] = relationship("Workspace")
+    asset: Mapped["Asset"] = relationship("Asset")
+    finding: Mapped["Finding"] = relationship("Finding")
+    remediation_proposal: Mapped["RemediationProposal"] = relationship("RemediationProposal", foreign_keys="VerificationJob.remediation_proposal_id")
+    remediation_application: Mapped["RemediationApplication"] = relationship("RemediationApplication", foreign_keys="VerificationJob.remediation_application_id")
+    requester: Mapped["Profile"] = relationship("Profile", foreign_keys=[requested_by])
+    baselines: Mapped[List["VerificationBaseline"]] = relationship("VerificationBaseline", back_populates="verification_job", cascade="all, delete-orphan")
+    checks: Mapped[List["VerificationCheck"]] = relationship("VerificationCheck", back_populates="verification_job", cascade="all, delete-orphan")
+    comparisons: Mapped[List["EvidenceComparison"]] = relationship("EvidenceComparison", back_populates="verification_job", cascade="all, delete-orphan")
+    reviews: Mapped[List["VerificationReview"]] = relationship("VerificationReview", back_populates="verification_job", cascade="all, delete-orphan")
+
+    __table_args__ = (
+        Index("idx_verification_jobs_ws_id", "workspace_id"),
+        Index("idx_verification_jobs_asset_id", "asset_id"),
+        Index("idx_verification_jobs_finding_id", "finding_id"),
+        Index("idx_verification_jobs_proposal_id", "remediation_proposal_id"),
+        Index("idx_verification_jobs_application_id", "remediation_application_id"),
+        Index("idx_verification_jobs_status", "status"),
+        Index("idx_verification_jobs_requested_by", "requested_by"),
+        Index("idx_verification_jobs_idempotency_key", "idempotency_key", unique=True),
+    )
+
+    def __repr__(self) -> str:
+        return f"<VerificationJob(id={self.id}, finding_id={self.finding_id}, status={self.status}, outcome={self.overall_outcome})>"
+
+
+class VerificationBaseline(Base):
+    __tablename__ = "verification_baselines"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    verification_job_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("verification_jobs.id", ondelete="CASCADE"), nullable=False, index=True)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False, index=True)
+    finding_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("findings.id", ondelete="CASCADE"), nullable=False, index=True)
+    original_finding_snapshot: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    original_evidence: Mapped[list] = mapped_column(JSONB, default=list, nullable=False)
+    scanner_version: Mapped[str] = mapped_column(Text, nullable=False)
+    scanner_config: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
+    rule_ids: Mapped[list] = mapped_column(ARRAY(Text), default=list, nullable=False)
+    finding_fingerprint: Mapped[str] = mapped_column(Text, nullable=False, index=True)
+    evidence_hashes: Mapped[list] = mapped_column(JSONB, default=list, nullable=False)
+    repository_revision: Mapped[str] = mapped_column(Text, nullable=False)
+    scan_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), ForeignKey("scans.id", ondelete="SET NULL"), nullable=True)
+    pre_patch_scan_results: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    capture_method: Mapped[str] = mapped_column(Text, default="handoff", nullable=False)
+    captured_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    captured_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("profiles.id", ondelete="RESTRICT"), nullable=False)
+
+    # Relationships
+    verification_job: Mapped["VerificationJob"] = relationship("VerificationJob", back_populates="baselines")
+    workspace: Mapped["Workspace"] = relationship("Workspace")
+    finding: Mapped["Finding"] = relationship("Finding")
+    scan: Mapped[Optional["Scan"]] = relationship("Scan")
+    capturer: Mapped["Profile"] = relationship("Profile", foreign_keys=[captured_by])
+
+    __table_args__ = (
+        Index("idx_verification_baselines_job_id", "verification_job_id"),
+        Index("idx_verification_baselines_finding_id", "finding_id"),
+        Index("idx_verification_baselines_fingerprint", "finding_fingerprint"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<VerificationBaseline(job_id={self.verification_job_id}, fingerprint={self.finding_fingerprint[:16]}...)>"
+
+
+class VerificationCheck(Base):
+    __tablename__ = "verification_checks"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    verification_job_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("verification_jobs.id", ondelete="CASCADE"), nullable=False, index=True)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False, index=True)
+    check_type: Mapped[CheckType] = mapped_column(SQLEnum(CheckType), nullable=False, index=True)
+    check_name: Mapped[str] = mapped_column(Text, nullable=False)
+    check_version: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    status: Mapped[CheckStatus] = mapped_column(SQLEnum(CheckStatus), default=CheckStatus.PENDING, nullable=False, index=True)
+    command: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    exit_code: Mapped[Optional[int]] = mapped_column(nullable=True)
+    stdout: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    stderr: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    duration_ms: Mapped[Optional[int]] = mapped_column(nullable=True)
+    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    metadata: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    # Relationships
+    verification_job: Mapped["VerificationJob"] = relationship("VerificationJob", back_populates="checks")
+    workspace: Mapped["Workspace"] = relationship("Workspace")
+
+    __table_args__ = (
+        Index("idx_verification_checks_job_id", "verification_job_id"),
+        Index("idx_verification_checks_type", "check_type"),
+        Index("idx_verification_checks_status", "status"),
+        Index("idx_verification_checks_name", "check_name"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<VerificationCheck(job_id={self.verification_job_id}, type={self.check_type}, name={self.check_name}, status={self.status})>"
+
+
+class EvidenceComparison(Base):
+    __tablename__ = "evidence_comparisons"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    verification_job_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("verification_jobs.id", ondelete="CASCADE"), nullable=False, index=True)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False, index=True)
+    baseline_finding_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), ForeignKey("findings.id", ondelete="SET NULL"), nullable=True)
+    post_patch_finding_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), ForeignKey("findings.id", ondelete="SET NULL"), nullable=True)
+    baseline_fingerprint: Mapped[str] = mapped_column(Text, nullable=False, index=True)
+    post_patch_fingerprint: Mapped[Optional[str]] = mapped_column(Text, nullable=True, index=True)
+    scanner_rule_id: Mapped[str] = mapped_column(Text, nullable=False)
+    normalized_file_path: Mapped[str] = mapped_column(Text, nullable=False)
+    baseline_location: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    post_patch_location: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    baseline_evidence_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    post_patch_evidence_hash: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    category: Mapped[ComparisonCategory] = mapped_column(SQLEnum(ComparisonCategory), nullable=False, index=True)
+    match_confidence: Mapped[Optional[float]] = mapped_column(nullable=True)
+    match_rationale: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    relationship_to_original: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    # Relationships
+    verification_job: Mapped["VerificationJob"] = relationship("VerificationJob", back_populates="comparisons")
+    workspace: Mapped["Workspace"] = relationship("Workspace")
+    baseline_finding: Mapped[Optional["Finding"]] = relationship("Finding", foreign_keys=[baseline_finding_id])
+    post_patch_finding: Mapped[Optional["Finding"]] = relationship("Finding", foreign_keys=[post_patch_finding_id])
+
+    __table_args__ = (
+        Index("idx_evidence_comparisons_job_id", "verification_job_id"),
+        Index("idx_evidence_comparisons_category", "category"),
+        Index("idx_evidence_comparisons_baseline_fp", "baseline_fingerprint"),
+        Index("idx_evidence_comparisons_post_patch_fp", "post_patch_fingerprint"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<EvidenceComparison(job_id={self.verification_job_id}, rule={self.scanner_rule_id}, category={self.category})>"
+
+
+class VerificationPolicy(Base):
+    __tablename__ = "verification_policies"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    version: Mapped[str] = mapped_column(Text, nullable=False, unique=True, index=True)
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    policy_config: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    is_active: Mapped[bool] = mapped_column(default=False, nullable=False)
+    created_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("profiles.id", ondelete="RESTRICT"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    # Relationships
+    creator: Mapped["Profile"] = relationship("Profile", foreign_keys=[created_by])
+
+    __table_args__ = (
+        Index("idx_verification_policies_version", "version"),
+        Index("idx_verification_policies_active", "is_active"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<VerificationPolicy(version={self.version}, active={self.is_active})>"
+
+
+class VerificationReview(Base):
+    __tablename__ = "verification_reviews"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    verification_job_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("verification_jobs.id", ondelete="CASCADE"), nullable=False, index=True)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False, index=True)
+    reviewed_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("profiles.id", ondelete="RESTRICT"), nullable=False)
+    decision: Mapped[ReviewDecision] = mapped_column(SQLEnum(ReviewDecision), nullable=False, index=True)
+    justification: Mapped[str] = mapped_column(Text, nullable=False)
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    policy_version: Mapped[str] = mapped_column(Text, nullable=False)
+    baseline_snapshot: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    comparison_snapshot: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    check_results_snapshot: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    reviewed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    # Relationships
+    verification_job: Mapped["VerificationJob"] = relationship("VerificationJob", back_populates="reviews")
+    workspace: Mapped["Workspace"] = relationship("Workspace")
+    reviewer: Mapped["Profile"] = relationship("Profile", foreign_keys=[reviewed_by])
+
+    __table_args__ = (
+        Index("idx_verification_reviews_job_id", "verification_job_id"),
+        Index("idx_verification_reviews_workspace_id", "workspace_id"),
+        Index("idx_verification_reviews_reviewed_by", "reviewed_by"),
+        Index("idx_verification_reviews_decision", "decision"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<VerificationReview(job_id={self.verification_job_id}, decision={self.decision}, reviewed_by={self.reviewed_by})>"

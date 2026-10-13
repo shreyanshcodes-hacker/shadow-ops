@@ -226,3 +226,8 @@ from app.services.validation import ValidationPipeline
 from app.services.approval import ApprovalService
 from app.services.application import PatchApplicationAdapter
 from app.services.rollback import RollbackService
+from app.services.baseline import BaselineCaptureService
+from app.services.comparison import EvidenceComparisonService
+from app.services.regression import RegressionAnalysisService
+from app.services.policy import VerificationPolicyEngine
+from app.services.verification import VerificationService

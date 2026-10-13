@@ -1221,3 +1221,309 @@ class RemediationDetailResponse(BaseSchema):
     applications: List[RemediationApplicationResponse] = Field(default_factory=list)
     rollbacks: List[RemediationRollbackResponse] = Field(default_factory=list)
     verification_handoff: Optional[RemediationVerificationHandoffResponse] = None
+
+
+# =============================================================================
+# Stage 9: Verification Schemas
+# =============================================================================
+
+class VerificationStatus(str, enum.Enum):
+    QUEUED = "QUEUED"
+    RUNNING = "RUNNING"
+    BASELINE_CHECK = "BASELINE_CHECK"
+    RESCANNING = "RESCANNING"
+    REGRESSION_CHECK = "REGRESSION_CHECK"
+    COMPARING_EVIDENCE = "COMPARING_EVIDENCE"
+    PASSED_PENDING_REVIEW = "PASSED_PENDING_REVIEW"
+    VERIFIED = "VERIFIED"
+    FAILED = "FAILED"
+    INCONCLUSIVE = "INCONCLUSIVE"
+    BLOCKED = "BLOCKED"
+    CANCELED = "CANCELED"
+
+
+class VerificationOutcome(str, enum.Enum):
+    VERIFIED_CANDIDATE = "VERIFIED_CANDIDATE"
+    FAILED = "FAILED"
+    INCONCLUSIVE = "INCONCLUSIVE"
+    BLOCKED = "BLOCKED"
+
+
+class CheckStatus(str, enum.Enum):
+    PENDING = "PENDING"
+    RUNNING = "RUNNING"
+    PASSED = "PASSED"
+    FAILED = "FAILED"
+    SKIPPED = "SKIPPED"
+    BLOCKED = "BLOCKED"
+    ERROR = "ERROR"
+
+
+class CheckType(str, enum.Enum):
+    ORIGINAL_VULNERABILITY = "original_vulnerability"
+    REGRESSION_ANALYSIS = "regression_analysis"
+    SCANNER_EXECUTION = "scanner_execution"
+    TEST_EXECUTION = "test_execution"
+    EVIDENCE_COMPARISON = "evidence_comparison"
+
+
+class ComparisonCategory(str, enum.Enum):
+    STILL_PRESENT = "STILL_PRESENT"
+    NO_LONGER_DETECTED = "NO_LONGER_DETECTED"
+    MODIFIED_OR_MOVED = "MODIFIED_OR_MOVED"
+    POSSIBLE_REGRESSION = "POSSIBLE_REGRESSION"
+    NEW_FINDING = "NEW_FINDING"
+    UNCOMPARABLE = "UNCOMPARABLE"
+
+
+class ReviewDecision(str, enum.Enum):
+    ACCEPT = "accept"
+    REJECT = "reject"
+    RERUN_REQUESTED = "rerun_requested"
+
+
+class VerificationJobBase(BaseSchema):
+    workspace_id: UUID
+    asset_id: UUID
+    finding_id: UUID
+    remediation_proposal_id: UUID
+    remediation_application_id: UUID
+    patch_hash: str
+    source_revision: str
+    target_revision: str
+    verification_engine_version: str = "verification-v1"
+    policy_version: str = "verification-policy-v1"
+    idempotency_key: str
+
+
+class VerificationJobCreate(VerificationJobBase):
+    pass
+
+
+class VerificationJobUpdate(BaseSchema):
+    status: Optional[VerificationStatus] = None
+    overall_outcome: Optional[VerificationOutcome] = None
+    original_vulnerability_outcome: Optional[CheckStatus] = None
+    regression_analysis_outcome: Optional[CheckStatus] = None
+    scanner_execution_outcome: Optional[CheckStatus] = None
+    test_execution_outcome: Optional[CheckStatus] = None
+    evidence_comparison_outcome: Optional[CheckStatus] = None
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    failed_at: Optional[datetime] = None
+    canceled_at: Optional[datetime] = None
+    error_code: Optional[str] = None
+    error_message: Optional[str] = None
+
+
+class VerificationJobResponse(VerificationJobBase):
+    id: UUID
+    status: VerificationStatus
+    overall_outcome: Optional[VerificationOutcome] = None
+    original_vulnerability_outcome: Optional[CheckStatus] = None
+    regression_analysis_outcome: Optional[CheckStatus] = None
+    scanner_execution_outcome: Optional[CheckStatus] = None
+    test_execution_outcome: Optional[CheckStatus] = None
+    evidence_comparison_outcome: Optional[CheckStatus] = None
+    requested_by: UUID
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    failed_at: Optional[datetime] = None
+    canceled_at: Optional[datetime] = None
+    error_code: Optional[str] = None
+    error_message: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+    finding: Optional["FindingListResponse"] = None
+    asset: Optional["AssetResponse"] = None
+
+
+class VerificationJobListResponse(BaseSchema):
+    id: UUID
+    workspace_id: UUID
+    asset_id: UUID
+    finding_id: UUID
+    remediation_proposal_id: UUID
+    remediation_application_id: UUID
+    patch_hash: str
+    status: VerificationStatus
+    overall_outcome: Optional[VerificationOutcome] = None
+    requested_by: UUID
+    created_at: datetime
+    completed_at: Optional[datetime] = None
+
+
+class VerificationBaselineBase(BaseSchema):
+    verification_job_id: UUID
+    finding_id: UUID
+    original_finding_snapshot: Dict[str, Any]
+    original_evidence: List[Dict[str, Any]] = Field(default_factory=list)
+    scanner_version: str
+    scanner_config: Dict[str, Any] = Field(default_factory=dict)
+    rule_ids: List[str] = Field(default_factory=list)
+    finding_fingerprint: str
+    evidence_hashes: List[str] = Field(default_factory=list)
+    repository_revision: str
+    scan_id: Optional[UUID] = None
+    pre_patch_scan_results: Optional[Dict[str, Any]] = None
+    capture_method: str = "handoff"
+
+
+class VerificationBaselineCreate(VerificationBaselineBase):
+    pass
+
+
+class VerificationBaselineResponse(VerificationBaselineBase):
+    id: UUID
+    workspace_id: UUID
+    captured_at: datetime
+    captured_by: UUID
+    finding: Optional["FindingListResponse"] = None
+    scan: Optional["ScanListResponse"] = None
+
+
+class VerificationCheckBase(BaseSchema):
+    verification_job_id: UUID
+    check_type: CheckType
+    check_name: str
+    check_version: Optional[str] = None
+
+
+class VerificationCheckCreate(VerificationCheckBase):
+    pass
+
+
+class VerificationCheckUpdate(BaseSchema):
+    status: Optional[CheckStatus] = None
+    command: Optional[str] = None
+    exit_code: Optional[int] = None
+    stdout: Optional[str] = None
+    stderr: Optional[str] = None
+    duration_ms: Optional[int] = None
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    error_message: Optional[str] = None
+    metadata: Optional[Dict[str, Any]] = None
+
+
+class VerificationCheckResponse(VerificationCheckBase):
+    id: UUID
+    workspace_id: UUID
+    status: CheckStatus
+    command: Optional[str] = None
+    exit_code: Optional[int] = None
+    stdout: Optional[str] = None
+    stderr: Optional[str] = None
+    duration_ms: Optional[int] = None
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    error_message: Optional[str] = None
+    metadata: Dict[str, Any]
+    created_at: datetime
+
+
+class EvidenceComparisonBase(BaseSchema):
+    verification_job_id: UUID
+    baseline_finding_id: Optional[UUID] = None
+    post_patch_finding_id: Optional[UUID] = None
+    baseline_fingerprint: str
+    post_patch_fingerprint: Optional[str] = None
+    scanner_rule_id: str
+    normalized_file_path: str
+    baseline_location: Optional[Dict[str, Any]] = None
+    post_patch_location: Optional[Dict[str, Any]] = None
+    baseline_evidence_hash: str
+    post_patch_evidence_hash: Optional[str] = None
+    category: ComparisonCategory
+    match_confidence: Optional[float] = None
+    match_rationale: Optional[str] = None
+    relationship_to_original: Optional[str] = None
+
+
+class EvidenceComparisonCreate(EvidenceComparisonBase):
+    pass
+
+
+class EvidenceComparisonResponse(EvidenceComparisonBase):
+    id: UUID
+    workspace_id: UUID
+    created_at: datetime
+    baseline_finding: Optional["FindingListResponse"] = None
+    post_patch_finding: Optional["FindingListResponse"] = None
+
+
+class VerificationPolicyBase(BaseSchema):
+    version: str
+    name: str
+    description: Optional[str] = None
+    policy_config: Dict[str, Any]
+    is_active: bool = False
+
+
+class VerificationPolicyCreate(VerificationPolicyBase):
+    pass
+
+
+class VerificationPolicyUpdate(BaseSchema):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    policy_config: Optional[Dict[str, Any]] = None
+    is_active: Optional[bool] = None
+
+
+class VerificationPolicyResponse(VerificationPolicyBase):
+    id: UUID
+    created_by: UUID
+    created_at: datetime
+    updated_at: datetime
+
+
+class VerificationReviewBase(BaseSchema):
+    verification_job_id: UUID
+    decision: ReviewDecision
+    justification: str
+    notes: Optional[str] = None
+    policy_version: str
+    baseline_snapshot: Dict[str, Any]
+    comparison_snapshot: Dict[str, Any]
+    check_results_snapshot: Dict[str, Any]
+
+
+class VerificationReviewCreate(VerificationReviewBase):
+    pass
+
+
+class VerificationReviewResponse(VerificationReviewBase):
+    id: UUID
+    workspace_id: UUID
+    reviewed_by: UUID
+    reviewed_at: datetime
+    created_at: datetime
+    reviewer: Optional["ProfileResponse"] = None
+
+
+# API Request/Response schemas
+class StartVerificationRequest(BaseSchema):
+    remediation_application_id: UUID
+    idempotency_key: str
+
+
+class VerificationReviewRequest(BaseSchema):
+    verification_job_id: UUID
+    decision: ReviewDecision
+    justification: str
+    notes: Optional[str] = None
+
+
+class RerunVerificationRequest(BaseSchema):
+    verification_job_id: UUID
+    idempotency_key: str
+
+
+class VerificationDetailResponse(BaseSchema):
+    job: VerificationJobResponse
+    baseline: Optional[VerificationBaselineResponse] = None
+    checks: List[VerificationCheckResponse] = Field(default_factory=list)
+    comparisons: List[EvidenceComparisonResponse] = Field(default_factory=list)
+    reviews: List[VerificationReviewResponse] = Field(default_factory=list)
+    policy: Optional[VerificationPolicyResponse] = None
