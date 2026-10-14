@@ -1746,3 +1746,326 @@ class ReportDetailResponse(BaseSchema):
     report: ReportResponse
     sections: List[ReportSectionResponse] = Field(default_factory=list)
     exports: List[ReportExportResponse] = Field(default_factory=list)
+
+
+# =============================================================================
+# Stage 11: Notification Schemas
+# =============================================================================
+
+class NotificationChannel(str, enum.Enum):
+    IN_APP = "in_app"
+    EMAIL = "email"
+
+
+class NotificationPriority(str, enum.Enum):
+    LOW = "low"
+    NORMAL = "normal"
+    HIGH = "high"
+    CRITICAL = "critical"
+
+
+class NotificationBase(BaseSchema):
+    workspace_id: UUID
+    user_id: UUID
+    type: str
+    title: str
+    message: str
+    reference_type: Optional[str] = None
+    reference_id: Optional[UUID] = None
+    channels: List[str] = Field(default_factory=lambda: ["in_app"])
+    read_at: Optional[datetime] = None
+    sent_at: Optional[datetime] = None
+    created_at: datetime
+    priority: str = "normal"
+    action_url: Optional[str] = None
+    action_label: Optional[str] = None
+    deduplication_key: Optional[str] = None
+    expires_at: Optional[datetime] = None
+
+
+class NotificationResponse(NotificationBase):
+    id: UUID
+    event_outbox_id: Optional[UUID] = None
+    rule_id: Optional[UUID] = None
+    is_read: bool = False
+
+
+class NotificationListResponse(NotificationBase):
+    id: UUID
+    is_read: bool = False
+
+
+class MarkReadRequest(BaseSchema):
+    notification_id: UUID
+
+
+class MarkAllReadRequest(BaseSchema):
+    workspace_id: UUID
+
+
+# Notification Preferences
+class NotificationPreferenceCategory(str, enum.Enum):
+    FINDING_CRITICAL_HIGH = "finding_critical_high"
+    FINDING_SEVERITY_CHANGED = "finding_severity_changed"
+    SCAN_FAILED = "scan_failed"
+    SCAN_COMPLETED = "scan_completed"
+    ATTACK_PATH_CREATED = "attack_path_created"
+    RISK_SCORE_CHANGED = "risk_score_changed"
+    REMEDIATION_AWAITING_APPROVAL = "remediation_awaiting_approval"
+    REMEDIATION_APPROVED = "remediation_approved"
+    REMEDIATION_REJECTED = "remediation_rejected"
+    REMEDIATION_APPLIED = "remediation_applied"
+    REMEDIATION_FAILED = "remediation_failed"
+    REMEDIATION_ROLLED_BACK = "remediation_rolled_back"
+    VERIFICATION_COMPLETED = "verification_completed"
+    VERIFICATION_FAILED = "verification_failed"
+    VERIFICATION_INCONCLUSIVE = "verification_inconclusive"
+    REPORT_GENERATED = "report_generated"
+    REPORT_GENERATION_FAILED = "report_generation_failed"
+    SECURITY_TEAM_COMPLETED = "security_team_completed"
+
+
+class NotificationPreferenceBase(BaseSchema):
+    workspace_id: UUID
+    user_id: UUID
+    category: str
+    in_app_enabled: bool = True
+    email_enabled: bool = False
+
+
+class NotificationPreferenceCreate(NotificationPreferenceBase):
+    pass
+
+
+class NotificationPreferenceUpdate(BaseSchema):
+    in_app_enabled: Optional[bool] = None
+    email_enabled: Optional[bool] = None
+
+
+class NotificationPreferenceResponse(NotificationPreferenceBase):
+    id: UUID
+    created_at: datetime
+    updated_at: datetime
+
+
+# Notification Rules
+class RuleRecipientPolicy(str, enum.Enum):
+    ASSET_OWNERS = "asset_owners"
+    ASSET_MEMBERS = "asset_members"
+    WORKSPACE_ADMINS = "workspace_admins"
+    WORKSPACE_OWNERS = "workspace_owners"
+    SPECIFIC_USERS = "specific_users"
+    FINDING_ASSIGNEES = "finding_assignees"
+    REMEDIATION_APPROVERS = "remediation_approvers"
+
+
+class NotificationRuleBase(BaseSchema):
+    workspace_id: UUID
+    name: str = Field(min_length=1, max_length=255)
+    description: Optional[str] = None
+    event_type: str
+    event_version: str = "1.0"
+    is_enabled: bool = True
+    recipient_policy: RuleRecipientPolicy = RuleRecipientPolicy.ASSET_OWNERS
+    specific_recipient_ids: List[UUID] = Field(default_factory=list)
+    severity_filter: List[str] = Field(default_factory=lambda: ["critical", "high", "medium", "low", "info"])
+    status_filter: List[str] = Field(default_factory=lambda: ["open", "triaged", "in_progress"])
+    enabled_channels: List[str] = Field(default_factory=lambda: ["in_app"])
+    deduplication_window_minutes: int = 60
+    rate_limit_per_hour: int = 100
+    require_acknowledgement: bool = False
+    acknowledgement_timeout_hours: Optional[int] = None
+    priority: str = "normal"
+    action_url_template: Optional[str] = None
+    action_label_template: Optional[str] = None
+    description: Optional[str] = None
+
+
+class NotificationRuleCreate(NotificationRuleBase):
+    pass
+
+
+class NotificationRuleUpdate(BaseSchema):
+    name: Optional[str] = Field(default=None, min_length=1, max_length=255)
+    description: Optional[str] = None
+    event_type: Optional[str] = None
+    event_version: Optional[str] = None
+    is_enabled: Optional[bool] = None
+    recipient_policy: Optional[RuleRecipientPolicy] = None
+    specific_recipient_ids: Optional[List[UUID]] = None
+    severity_filter: Optional[List[str]] = None
+    status_filter: Optional[List[str]] = None
+    enabled_channels: Optional[List[str]] = None
+    deduplication_window_minutes: Optional[int] = None
+    rate_limit_per_hour: Optional[int] = None
+    require_acknowledgement: Optional[bool] = None
+    acknowledgement_timeout_hours: Optional[int] = None
+    priority: Optional[str] = None
+    action_url_template: Optional[str] = None
+    action_label_template: Optional[str] = None
+
+
+class NotificationRuleResponse(NotificationRuleBase):
+    id: UUID
+    is_enabled: bool
+    created_by: UUID
+    created_at: datetime
+    updated_at: datetime
+
+
+# Notification Deliveries
+class DeliveryStatus(str, enum.Enum):
+    PENDING = "pending"
+    SENT = "sent"
+    DELIVERED = "delivered"
+    FAILED = "failed"
+    BOUNCED = "bounced"
+    RETRYING = "retrying"
+
+
+class NotificationDeliveryBase(BaseSchema):
+    notification_id: UUID
+    workspace_id: UUID
+    channel: str
+    recipient_id: UUID
+    status: DeliveryStatus
+    attempt_count: int
+    max_attempts: int
+    next_retry_at: Optional[datetime] = None
+    last_error: Optional[str] = None
+    last_error_category: Optional[str] = None
+    provider_message_id: Optional[str] = None
+    provider_response: Optional[Dict[str, Any]] = None
+    sent_at: Optional[datetime] = None
+    delivered_at: Optional[datetime] = None
+    failed_at: Optional[datetime] = None
+
+
+class NotificationDeliveryResponse(NotificationDeliveryBase):
+    id: UUID
+    created_at: datetime
+    updated_at: datetime
+
+
+# Workflow Runs
+class WorkflowStatus(str, enum.Enum):
+    PENDING = "pending"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+
+class WorkflowRunBase(BaseSchema):
+    workspace_id: UUID
+    workflow_id: str
+    workflow_version: str
+    input_payload: Dict[str, Any] = Field(default_factory=dict)
+    trigger_event_outbox_id: Optional[UUID] = None
+    trigger_event_type: Optional[str] = None
+    trigger_resource_type: Optional[str] = None
+    trigger_resource_id: Optional[UUID] = None
+    timeout_minutes: int = 30
+
+
+class WorkflowRunCreate(WorkflowRunBase):
+    pass
+
+
+class WorkflowRunResponse(BaseSchema):
+    id: UUID
+    workspace_id: UUID
+    workflow_id: str
+    workflow_version: str
+    trigger_event_outbox_id: Optional[UUID] = None
+    trigger_event_type: Optional[str] = None
+    trigger_resource_type: Optional[str] = None
+    trigger_resource_id: Optional[UUID] = None
+    input_payload: Dict[str, Any]
+    status: WorkflowStatus
+    current_action_index: int
+    actions_executed: List[Dict[str, Any]]
+    output_payload: Optional[Dict[str, Any]] = None
+    error_message: Optional[str] = None
+    error_category: Optional[str] = None
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    failed_at: Optional[datetime] = None
+    timeout_at: Optional[datetime] = None
+    idempotency_key: str
+    created_by: Optional[UUID] = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class WorkflowRunListResponse(BaseSchema):
+    id: UUID
+    workspace_id: UUID
+    workflow_id: str
+    workflow_version: str
+    status: WorkflowStatus
+    created_at: datetime
+    completed_at: Optional[datetime] = None
+
+
+class WorkflowRunEventResponse(BaseSchema):
+    id: UUID
+    workflow_run_id: UUID
+    workspace_id: UUID
+    action_type: str
+    action_name: str
+    action_input: Dict[str, Any]
+    action_output: Optional[Dict[str, Any]] = None
+    status: str
+    error_message: Optional[str] = None
+    duration_ms: Optional[int] = None
+    executed_at: datetime
+
+
+class WorkflowRunDetailResponse(BaseSchema):
+    run: WorkflowRunResponse
+    events: List[WorkflowRunEventResponse] = Field(default_factory=list)
+
+
+class WorkflowRunRetryRequest(BaseSchema):
+    pass
+
+
+class WorkflowRunRetryResponse(BaseSchema):
+    run: WorkflowRunResponse
+
+
+# Event Outbox
+class EventProcessingStatus(str, enum.Enum):
+    PENDING = "pending"
+    PROCESSING = "processing"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    DEAD_LETTER = "dead_letter"
+
+
+class EventOutboxResponse(BaseSchema):
+    id: UUID
+    workspace_id: UUID
+    event_type: str
+    event_version: str
+    event_id: UUID
+    correlation_id: Optional[UUID] = None
+    occurred_at: datetime
+    actor_id: Optional[UUID] = None
+    resource_type: Optional[str] = None
+    resource_id: Optional[UUID] = None
+    payload: Dict[str, Any]
+    status: EventProcessingStatus
+    attempt_count: int
+    max_attempts: int
+    next_retry_at: Optional[datetime] = None
+    last_error: Optional[str] = None
+    last_error_category: Optional[str] = None
+    processed_at: Optional[datetime] = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class EventOutboxListResponse(BaseSchema):
+    events: List[EventOutboxResponse]

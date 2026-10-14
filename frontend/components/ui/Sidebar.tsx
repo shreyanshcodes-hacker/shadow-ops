@@ -2,9 +2,12 @@
 
 import { ReactNode, useState } from 'react';
 import Link from 'next/link';
+import { useAuthContext } from '@/components/providers/AuthProvider';
+import { api } from '@/lib/api';
+import { Bell, BellOff } from 'lucide-react';
 import { usePathname } from 'next/navigation';
 import { 
-  LayoutDashboard, Search, AlertTriangle, GitBranch, Bot, Wrench, FileText, MessageSquare, Database, Users, Settings, LogOut, ChevronRight, Menu, X, User, Building2, Shield 
+  LayoutDashboard, Search, AlertTriangle, GitBranch, Bot, Wrench, FileText, MessageSquare, Database, Users, Settings, LogOut, ChevronRight, Menu, X, User, Building2, Shield, Bell 
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { useAuth } from '@/hooks/useAuth';
@@ -48,10 +51,19 @@ export function Sidebar({ navigation, currentPath, user, profile, children }: Si
   const [mobileOpen, setMobileOpen] = useState(false);
   const { logout } = useAuth();
   const pathname = usePathname();
+  const { currentWorkspace } = useAuthContext();
 
   const displayName = profile?.display_name || user?.displayName || user?.email?.split('@')[0] || 'User';
   const displayEmail = profile?.email || user?.email || '';
   const avatarUrl = profile?.avatar_url || user?.photoURL;
+
+  const [unreadCount, setUnreadCount] = useState(0);
+
+  useEffect(() => {
+    if (currentWorkspace) {
+      api.getUnreadCount(currentWorkspace.id).then(data => setUnreadCount(data.unread_count)).catch(() => {});
+    }
+  }, [currentWorkspace]);
 
   const handleLogout = async () => {
     await logout();
@@ -82,15 +94,30 @@ export function Sidebar({ navigation, currentPath, user, profile, children }: Si
               <span className="font-bold text-lg text-foreground-DEFAULT">ShadowOps</span>
             </Link>
           )}
-          <button
-            onClick={() => setCollapsed(!collapsed)}
-            className="p-1.5 rounded-lg hover:bg-background-tertiary transition-colors"
-            aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-            aria-expanded={!collapsed}
-          >
-            <ChevronRight className={clsx('h-4 w-4 transition-transform', collapsed && 'rotate-180')} />
-          </button>
-        </div>
+          <div className="flex items-center gap-2">
+            {!collapsed && currentWorkspace && (
+              <button
+                className="relative p-2 rounded-lg hover:bg-background-tertiary transition-colors text-foreground-muted hover:text-foreground-DEFAULT"
+                onClick={() => window.location.href = '/notifications'}
+                aria-label={`Notifications${unreadCount > 0 ? ` (${unreadCount} unread)` : ''}`}
+              >
+                {unreadCount > 0 ? (
+                  <span className="absolute -top-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-white text-xs font-medium">
+                    {unreadCount > 99 ? '99+' : unreadCount}
+                  </span>
+                ) : null}
+                <Bell className="h-5 w-5" />
+              </button>
+            )}
+            <button
+              onClick={() => setCollapsed(!collapsed)}
+              className="p-1.5 rounded-lg hover:bg-background-tertiary transition-colors"
+              aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+              aria-expanded={!collapsed}
+            >
+              <ChevronRight className={clsx('h-4 w-4 transition-transform', collapsed && 'rotate-180')} />
+            </button>
+          </div>
 
         <nav className="flex-1 overflow-y-auto py-4 px-2" aria-label="Navigation">
           <ul className="space-y-1" role="list">

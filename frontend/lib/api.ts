@@ -1874,3 +1874,785 @@ async exportReport(reportId: string, format: ReportFormat): Promise<ReportExport
 async getReportDownloadUrl(reportId: string, exportId: string): Promise<{ download_url: string; expires_in: number }> {
   return this.get(`/reports/${reportId}/download?export_id=${exportId}`);
 }
+
+// =============================================================================
+// Stage 11: Notification Types
+// =============================================================================
+
+export type NotificationChannel = 'in_app' | 'email';
+
+export type NotificationPriority = 'low' | 'normal' | 'high' | 'critical';
+
+export interface NotificationBase {
+  workspace_id: string;
+  user_id: string;
+  type: string;
+  title: string;
+  message: string;
+  reference_type?: string;
+  reference_id?: string;
+  channels: string[];
+  read_at?: string;
+  sent_at?: string;
+  created_at: string;
+  priority: string;
+  action_url?: string;
+  action_label?: string;
+  deduplication_key?: string;
+  expires_at?: string;
+}
+
+export interface NotificationResponse extends NotificationBase {
+  id: string;
+  event_outbox_id?: string;
+  rule_id?: string;
+  is_read: boolean;
+}
+
+export interface NotificationListResponse extends NotificationBase {
+  id: string;
+  is_read: boolean;
+}
+
+export interface MarkReadRequest {
+  notification_id: string;
+}
+
+export interface MarkAllReadRequest {
+  workspace_id: string;
+}
+
+// Notification Preferences
+export type NotificationPreferenceCategory = 
+  | 'finding_critical_high'
+  | 'finding_severity_changed'
+  | 'scan_failed'
+  | 'scan_completed'
+  | 'attack_path_created'
+  | 'risk_score_changed'
+  | 'remediation_awaiting_approval'
+  | 'remediation_approved'
+  | 'remediation_rejected'
+  | 'remediation_applied'
+  | 'remediation_failed'
+  | 'remediation_rolled_back'
+  | 'verification_completed'
+  | 'verification_failed'
+  | 'verification_inconclusive'
+  | 'report_generated'
+  | 'report_generation_failed'
+  | 'security_team_completed';
+
+export interface NotificationPreferenceBase {
+  workspace_id: string;
+  user_id: string;
+  category: string;
+  in_app_enabled: boolean;
+  email_enabled: boolean;
+}
+
+export interface NotificationPreferenceResponse extends NotificationPreferenceBase {
+  id: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface NotificationPreferenceUpdate {
+  in_app_enabled?: boolean;
+  email_enabled?: boolean;
+}
+
+// Notification Rules
+export type RuleRecipientPolicy = 
+  | 'asset_owners'
+  | 'asset_members'
+  | 'workspace_admins'
+  | 'workspace_owners'
+  | 'specific_users'
+  | 'finding_assignees'
+  | 'remediation_approvers';
+
+export interface NotificationRuleBase {
+  workspace_id: string;
+  name: string;
+  description?: string;
+  event_type: string;
+  event_version: string;
+  is_enabled: boolean;
+  recipient_policy: RuleRecipientPolicy;
+  specific_recipient_ids: string[];
+  severity_filter: string[];
+  status_filter: string[];
+  enabled_channels: string[];
+  deduplication_window_minutes: number;
+  rate_limit_per_hour: number;
+  require_acknowledgement: boolean;
+  acknowledgement_timeout_hours?: number;
+  priority: string;
+  action_url_template?: string;
+  action_label_template?: string;
+  description?: string;
+}
+
+export interface NotificationRuleResponse extends NotificationRuleBase {
+  id: string;
+  is_enabled: boolean;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface NotificationRuleCreate {
+  workspace_id: string;
+  name: string;
+  description?: string;
+  event_type: string;
+  event_version?: string;
+  is_enabled?: boolean;
+  recipient_policy?: RuleRecipientPolicy;
+  specific_recipient_ids?: string[];
+  severity_filter?: string[];
+  status_filter?: string[];
+  enabled_channels?: string[];
+  deduplication_window_minutes?: number;
+  rate_limit_per_hour?: number;
+  require_acknowledgement?: boolean;
+  acknowledgement_timeout_hours?: number;
+  priority?: string;
+  action_url_template?: string;
+  action_label_template?: string;
+  description?: string;
+}
+
+export interface NotificationRuleUpdate {
+  name?: string;
+  description?: string;
+  event_type?: string;
+  event_version?: string;
+  is_enabled?: boolean;
+  recipient_policy?: RuleRecipientPolicy;
+  specific_recipient_ids?: string[];
+  severity_filter?: string[];
+  status_filter?: string[];
+  enabled_channels?: string[];
+  deduplication_window_minutes?: number;
+  rate_limit_per_hour?: number;
+  require_acknowledgement?: boolean;
+  acknowledgement_timeout_hours?: number;
+  priority?: string;
+  action_url_template?: string;
+  action_label_template?: string;
+  description?: string;
+}
+
+// Notification Deliveries
+export type DeliveryStatus = 
+  | 'pending'
+  | 'sent'
+  | 'delivered'
+  | 'failed'
+  | 'bounced'
+  | 'retrying';
+
+export interface NotificationDeliveryResponse {
+  id: string;
+  notification_id: string;
+  workspace_id: string;
+  channel: string;
+  recipient_id: string;
+  status: DeliveryStatus;
+  attempt_count: number;
+  max_attempts: number;
+  next_retry_at?: string;
+  last_error?: string;
+  last_error_category?: string;
+  provider_message_id?: string;
+  provider_response?: Record<string, unknown>;
+  sent_at?: string;
+  delivered_at?: string;
+  failed_at?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+// Workflow Runs
+export type WorkflowStatus = 
+  | 'pending'
+  | 'running'
+  | 'completed'
+  | 'failed'
+  | 'cancelled';
+
+export interface WorkflowRunBase {
+  workspace_id: string;
+  workflow_id: string;
+  workflow_version: string;
+  input_payload: Record<string, unknown>;
+  trigger_event_outbox_id?: string;
+  trigger_event_type?: string;
+  trigger_resource_type?: string;
+  trigger_resource_id?: string;
+  timeout_minutes?: number;
+}
+
+export interface WorkflowRunResponse {
+  id: string;
+  workspace_id: string;
+  workflow_id: string;
+  workflow_version: string;
+  trigger_event_outbox_id?: string;
+  trigger_event_type?: string;
+  trigger_resource_type?: string;
+  trigger_resource_id?: string;
+  input_payload: Record<string, unknown>;
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
+  current_action_index: number;
+  actions_executed: Record<string, unknown>[];
+  output_payload?: Record<string, unknown>;
+  error_message?: string;
+  error_category?: string;
+  started_at?: string;
+  completed_at?: string;
+  failed_at?: string;
+  timeout_at?: string;
+  idempotency_key: string;
+  created_by?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface WorkflowRunListResponse {
+  id: string;
+  workspace_id: string;
+  workflow_id: string;
+  workflow_version: string;
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
+  created_at: string;
+  completed_at?: string;
+}
+
+export interface WorkflowRunEventResponse {
+  id: string;
+  workflow_run_id: string;
+  workspace_id: string;
+  action_type: string;
+  action_name: string;
+  action_input: Record<string, unknown>;
+  action_output?: Record<string, unknown>;
+  status: string;
+  error_message?: string;
+  duration_ms?: number;
+  executed_at: string;
+}
+
+export interface WorkflowRunDetailResponse {
+  run: WorkflowRunResponse;
+  events: WorkflowRunEventResponse[];
+}
+
+export interface WorkflowRunCreate {
+  workflow_id: string;
+  workflow_version: string;
+  input_payload: Record<string, unknown>;
+  trigger_event_outbox_id?: string;
+  trigger_event_type?: string;
+  trigger_resource_type?: string;
+  trigger_resource_id?: string;
+  timeout_minutes?: number;
+}
+
+// Event Outbox
+export type EventProcessingStatus = 
+  | 'pending'
+  | 'processing'
+  | 'completed'
+  | 'failed'
+  | 'dead_letter';
+
+export interface EventOutboxResponse {
+  id: string;
+  workspace_id: string;
+  event_type: string;
+  event_version: string;
+  event_id: string;
+  correlation_id?: string;
+  occurred_at: string;
+  actor_id?: string;
+  resource_type?: string;
+  resource_id?: string;
+  payload: Record<string, unknown>;
+  status: EventProcessingStatus;
+  attempt_count: number;
+  max_attempts: number;
+  next_retry_at?: string;
+  last_error?: string;
+  last_error_category?: string;
+  processed_at?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+// Notification API methods
+async listNotifications(workspaceId: string, params?: Record<string, string>): Promise<NotificationListResponse[]> {
+  const query = params ? `?${new URLSearchParams(params).toString()}` : '';
+  return this.get(`/notifications${query}`);
+}
+
+async getUnreadCount(workspaceId: string): Promise<{ unread_count: number }> {
+  return this.get(`/notifications/unread-count?workspace_id=${workspaceId}`);
+}
+
+async markNotificationRead(notificationId: string): Promise<NotificationResponse> {
+  return this.post(`/notifications/${notificationId}/read`, {});
+}
+
+async markAllRead(workspaceId: string): Promise<{ marked_read: number }> {
+  return this.post('/notifications/read-all', { workspace_id: workspaceId });
+}
+
+async cleanupExpiredNotifications(workspaceId: string): Promise<{ deleted: number }> {
+  return this.delete(`/notifications/cleanup-expired?workspace_id=${workspaceId}`);
+}
+
+async getPreferences(workspaceId: string): Promise<NotificationPreferenceResponse[]> {
+  return this.get(`/notifications/preferences?workspace_id=${workspaceId}`);
+}
+
+async updatePreference(workspaceId: string, category: string, data: { in_app_enabled?: boolean; email_enabled?: boolean }): Promise<NotificationPreferenceResponse> {
+  return this.put(`/notifications/preferences/${category}?workspace_id=${workspaceId}`, data);
+}
+
+async listRules(workspaceId: string, params?: Record<string, string>): Promise<NotificationRuleResponse[]> {
+  const query = params ? `?${new URLSearchParams(params).toString()}` : '';
+  return this.get(`/notifications/rules${query}`);
+}
+
+async createRule(workspaceId: string, data: NotificationRuleCreate): Promise<NotificationRuleResponse> {
+  return this.post(`/notifications/rules?workspace_id=${workspaceId}`, data);
+}
+
+async updateRule(ruleId: string, data: Partial<NotificationRuleCreate>): Promise<NotificationRuleResponse> {
+  return this.put(`/notifications/rules/${ruleId}`, data);
+}
+
+async deleteRule(ruleId: string): Promise<{ deleted: boolean }> {
+  return this.delete(`/notifications/rules/${ruleId}`);
+}
+
+async getDeliveries(notificationId: string): Promise<NotificationDeliveryResponse[]> {
+  return this.get(`/notifications/${notificationId}/deliveries`);
+}
+
+async retryDelivery(deliveryId: string): Promise<{ retried: boolean }> {
+  return this.post(`/notifications/deliveries/${deliveryId}/retry`, {});
+}
+
+async getDeliveryStats(workspaceId: string): Promise<Record<string, number>> {
+  return this.get(`/notifications/deliveries/stats?workspace_id=${workspaceId}`);
+}
+
+async createWorkflowRun(data: { workflow_id: string; workflow_version: string; input_payload: Record<string, unknown>; trigger_event_outbox_id?: string; trigger_event_type?: string; trigger_resource_type?: string; trigger_resource_id?: string; timeout_minutes?: number }): Promise<WorkflowRunResponse> {
+  return this.post('/notifications/workflows', data);
+}
+
+async listWorkflows(workspaceId: string, params?: Record<string, string>): Promise<WorkflowRunListResponse[]> {
+  const query = params ? `?${new URLSearchParams(params).toString()}` : '';
+  return this.get(`/notifications/workflows${query}`);
+}
+
+async getWorkflow(runId: string): Promise<WorkflowRunDetailResponse> {
+  return this.get(`/notifications/workflows/${runId}`);
+}
+
+async retryWorkflow(runId: string): Promise<WorkflowRunResponse> {
+  return this.post(`/notifications/workflows/${runId}/retry`, {});
+}
+
+async cancelWorkflow(runId: string): Promise<{ cancelled: boolean }> {
+  return this.post(`/notifications/workflows/${runId}/cancel`, {});
+}
+
+async getWorkflowStats(workspaceId: string): Promise<Record<string, number>> {
+  return this.get(`/notifications/workflows/stats?workspace_id=${workspaceId}`);
+}
+
+async listEvents(workspaceId: string, params?: Record<string, string>): Promise<EventOutboxResponse[]> {
+  const query = params ? `?${new URLSearchParams(params).toString()}` : '';
+  return this.get(`/notifications/events${query}`);
+}
+
+async getEvent(eventId: string): Promise<EventOutboxResponse> {
+  return this.get(`/notifications/events/${eventId}`);
+}
+
+async retryEvent(eventId: string): Promise<{ retried: boolean }> {
+  return this.post(`/notifications/events/${eventId}/retry`, {});
+}
+
+async getEventStats(workspaceId: string): Promise<Record<string, number>> {
+  return this.get(`/notifications/events/stats?workspace_id=${workspaceId}`);
+}
+
+async getUnreadCount(workspaceId: string): Promise<{ unread_count: number }> {
+  return this.get(`/notifications/unread-count?workspace_id=${workspaceId}`);
+}
+
+async markNotificationRead(notificationId: string): Promise<NotificationResponse> {
+  return this.post(`/notifications/${notificationId}/read`, {});
+}
+
+async markAllRead(workspaceId: string): Promise<{ marked_read: number }> {
+  return this.post('/notifications/read-all', { workspace_id: workspaceId });
+}
+
+async getPreferences(workspaceId: string): Promise<NotificationPreferenceResponse[]> {
+  return this.get(`/notifications/preferences?workspace_id=${workspaceId}`);
+}
+
+async updatePreference(workspaceId: string, category: string, data: { in_app_enabled?: boolean; email_enabled?: boolean }): Promise<NotificationPreferenceResponse> {
+  return this.put(`/notifications/preferences/${category}?workspace_id=${workspaceId}`, data);
+}
+
+async listRules(workspaceId: string, params?: Record<string, string>): Promise<NotificationRuleResponse[]> {
+  const query = params ? `?${new URLSearchParams(params).toString()}` : '';
+  return this.get(`/notifications/rules${query}`);
+}
+
+async createRule(workspaceId: string, data: NotificationRuleCreate): Promise<NotificationRuleResponse> {
+  return this.post(`/notifications/rules?workspace_id=${workspaceId}`, data);
+}
+
+async updateRule(ruleId: string, data: Partial<NotificationRuleCreate>): Promise<NotificationRuleResponse> {
+  return this.put(`/notifications/rules/${ruleId}`, data);
+}
+
+async deleteRule(ruleId: string): Promise<{ deleted: boolean }> {
+  return this.delete(`/notifications/rules/${ruleId}`);
+}
+
+async getDeliveries(notificationId: string): Promise<NotificationDeliveryResponse[]> {
+  return this.get(`/notifications/${notificationId}/deliveries`);
+}
+
+async retryDelivery(deliveryId: string): Promise<{ retried: boolean }> {
+  return this.post(`/notifications/deliveries/${deliveryId}/retry`, {});
+}
+
+async getDeliveryStats(workspaceId: string): Promise<Record<string, number>> {
+  return this.get(`/notifications/deliveries/stats?workspace_id=${workspaceId}`);
+}
+
+async createWorkflowRun(data: { workflow_id: string; workflow_version: string; input_payload: Record<string, unknown>; trigger_event_outbox_id?: string; trigger_event_type?: string; trigger_resource_type?: string; trigger_resource_id?: string; timeout_minutes?: number }): Promise<WorkflowRunResponse> {
+  return this.post('/notifications/workflows', data);
+}
+
+async listWorkflows(workspaceId: string, params?: Record<string, string>): Promise<WorkflowRunListResponse[]> {
+  const query = params ? `?${new URLSearchParams(params).toString()}` : '';
+  return this.get(`/notifications/workflows${query}`);
+}
+
+async getWorkflow(runId: string): Promise<WorkflowRunDetailResponse> {
+  return this.get(`/notifications/workflows/${runId}`);
+}
+
+async retryWorkflow(runId: string): Promise<WorkflowRunResponse> {
+  return this.post(`/notifications/workflows/${runId}/retry`, {});
+}
+
+async cancelWorkflow(runId: string): Promise<{ cancelled: boolean }> {
+  return this.post(`/notifications/workflows/${runId}/cancel`, {});
+}
+
+async getWorkflowStats(workspaceId: string): Promise<Record<string, number>> {
+  return this.get(`/notifications/workflows/stats?workspace_id=${workspaceId}`);
+}
+
+async listEvents(workspaceId: string, params?: Record<string, string>): Promise<EventOutboxResponse[]> {
+  const query = params ? `?${new URLSearchParams(params).toString()}` : '';
+  return this.get(`/notifications/events${query}`);
+}
+
+async getEvent(eventId: string): Promise<EventOutboxResponse> {
+  return this.get(`/notifications/events/${eventId}`);
+}
+
+async retryEvent(eventId: string): Promise<{ retried: boolean }> {
+  return this.post(`/notifications/events/${eventId}/retry`, {});
+}
+
+async getEventStats(workspaceId: string): Promise<Record<string, number>> {
+  return this.get(`/notifications/events/stats?workspace_id=${workspaceId}`);
+}
+
+async getUnreadCount(workspaceId: string): Promise<{ unread_count: number }> {
+  return this.get(`/notifications/unread-count?workspace_id=${workspaceId}`);
+}
+
+async markNotificationRead(notificationId: string): Promise<NotificationResponse> {
+  return this.post(`/notifications/${notificationId}/read`, {});
+}
+
+async markAllRead(workspaceId: string): Promise<{ marked_read: number }> {
+  return this.post('/notifications/read-all', { workspace_id: workspaceId });
+}
+
+async getPreferences(workspaceId: string): Promise<NotificationPreferenceResponse[]> {
+  return this.get(`/notifications/preferences?workspace_id=${workspaceId}`);
+}
+
+async updatePreference(workspaceId: string, category: string, data: { in_app_enabled?: boolean; email_enabled?: boolean }): Promise<NotificationPreferenceResponse> {
+  return this.put(`/notifications/preferences/${category}?workspace_id=${workspaceId}`, data);
+}
+
+async listRules(workspaceId: string, params?: Record<string, string>): Promise<NotificationRuleResponse[]> {
+  const query = params ? `?${new URLSearchParams(params).toString()}` : '';
+  return this.get(`/notifications/rules${query}`);
+}
+
+async createRule(workspaceId: string, data: NotificationRuleCreate): Promise<NotificationRuleResponse> {
+  return this.post(`/notifications/rules?workspace_id=${workspaceId}`, data);
+}
+
+async updateRule(ruleId: string, data: Partial<NotificationRuleCreate>): Promise<NotificationRuleResponse> {
+  return this.put(`/notifications/rules/${ruleId}`, data);
+}
+
+async deleteRule(ruleId: string): Promise<{ deleted: boolean }> {
+  return this.delete(`/notifications/rules/${ruleId}`);
+}
+
+async getDeliveries(notificationId: string): Promise<NotificationDeliveryResponse[]> {
+  return this.get(`/notifications/${notificationId}/deliveries`);
+}
+
+async retryDelivery(deliveryId: string): Promise<{ retried: boolean }> {
+  return this.post(`/notifications/deliveries/${deliveryId}/retry`, {});
+}
+
+async getDeliveryStats(workspaceId: string): Promise<Record<string, number>> {
+  return this.get(`/notifications/deliveries/stats?workspace_id=${workspaceId}`);
+}
+
+async createWorkflowRun(data: { workflow_id: string; workflow_version: string; input_payload: Record<string, unknown>; trigger_event_outbox_id?: string; trigger_event_type?: string; trigger_resource_type?: string; trigger_resource_id?: string; timeout_minutes?: number }): Promise<WorkflowRunResponse> {
+  return this.post('/notifications/workflows', data);
+}
+
+async listWorkflows(workspaceId: string, params?: Record<string, string>): Promise<WorkflowRunListResponse[]> {
+  const query = params ? `?${new URLSearchParams(params).toString()}` : '';
+  return this.get(`/notifications/workflows${query}`);
+}
+
+async getWorkflow(runId: string): Promise<WorkflowRunDetailResponse> {
+  return this.get(`/notifications/workflows/${runId}`);
+}
+
+async retryWorkflow(runId: string): Promise<WorkflowRunResponse> {
+  return this.post(`/notifications/workflows/${runId}/retry`, {});
+}
+
+async cancelWorkflow(runId: string): Promise<{ cancelled: boolean }> {
+  return this.post(`/notifications/workflows/${runId}/cancel`, {});
+}
+
+async getWorkflowStats(workspaceId: string): Promise<Record<string, number>> {
+  return this.get(`/notifications/workflows/stats?workspace_id=${workspaceId}`);
+}
+
+async listEvents(workspaceId: string, params?: Record<string, string>): Promise<EventOutboxResponse[]> {
+  const query = params ? `?${new URLSearchParams(params).toString()}` : '';
+  return this.get(`/notifications/events${query}`);
+}
+
+async getEvent(eventId: string): Promise<EventOutboxResponse> {
+  return this.get(`/notifications/events/${eventId}`);
+}
+
+async retryEvent(eventId: string): Promise<{ retried: boolean }> {
+  return this.post(`/notifications/events/${eventId}/retry`, {});
+}
+
+async getEventStats(workspaceId: string): Promise<Record<string, number>> {
+  return this.get(`/notifications/events/stats?workspace_id=${workspaceId}`);
+}
+
+async getUnreadCount(workspaceId: string): Promise<{ unread_count: number }> {
+  return this.get(`/notifications/unread-count?workspace_id=${workspaceId}`);
+}
+
+async markNotificationRead(notificationId: string): Promise<NotificationResponse> {
+  return this.post(`/notifications/${notificationId}/read`, {});
+}
+
+async markAllRead(workspaceId: string): Promise<{ marked_read: number }> {
+  return this.post('/notifications/read-all', { workspace_id: workspaceId });
+}
+
+async getPreferences(workspaceId: string): Promise<NotificationPreferenceResponse[]> {
+  return this.get(`/notifications/preferences?workspace_id=${workspaceId}`);
+}
+
+async updatePreference(workspaceId: string, category: string, data: { in_app_enabled?: boolean; email_enabled?: boolean }): Promise<NotificationPreferenceResponse> {
+  return this.put(`/notifications/preferences/${category}?workspace_id=${workspaceId}`, data);
+}
+
+async listRules(workspaceId: string, params?: Record<string, string>): Promise<NotificationRuleResponse[]> {
+  const query = params ? `?${new URLSearchParams(params).toString()}` : '';
+  return this.get(`/notifications/rules${query}`);
+}
+
+async createRule(workspaceId: string, data: NotificationRuleCreate): Promise<NotificationRuleResponse> {
+  return this.post(`/notifications/rules?workspace_id=${workspaceId}`, data);
+}
+
+async updateRule(ruleId: string, data: Partial<NotificationRuleCreate>): Promise<NotificationRuleResponse> {
+  return this.put(`/notifications/rules/${ruleId}`, data);
+}
+
+async deleteRule(ruleId: string): Promise<{ deleted: boolean }> {
+  return this.delete(`/notifications/rules/${ruleId}`);
+}
+
+async getDeliveries(notificationId: string): Promise<NotificationDeliveryResponse[]> {
+  return this.get(`/notifications/${notificationId}/deliveries`);
+}
+
+async retryDelivery(deliveryId: string): Promise<{ retried: boolean }> {
+  return this.post(`/notifications/deliveries/${deliveryId}/retry`, {});
+}
+
+async getDeliveryStats(workspaceId: string): Promise<Record<string, number>> {
+  return this.get(`/notifications/deliveries/stats?workspace_id=${workspaceId}`);
+}
+
+async createWorkflowRun(data: { workflow_id: string; workflow_version: string; input_payload: Record<string, unknown>; trigger_event_outbox_id?: string; trigger_event_type?: string; trigger_resource_type?: string; trigger_resource_id?: string; timeout_minutes?: number }): Promise<WorkflowRunResponse> {
+  return this.post('/notifications/workflows', data);
+}
+
+async listWorkflows(workspaceId: string, params?: Record<string, string>): Promise<WorkflowRunListResponse[]> {
+  const query = params ? `?${new URLSearchParams(params).toString()}` : '';
+  return this.get(`/notifications/workflows${query}`);
+}
+
+async getWorkflow(runId: string): Promise<WorkflowRunDetailResponse> {
+  return this.get(`/notifications/workflows/${runId}`);
+}
+
+async retryWorkflow(runId: string): Promise<WorkflowRunResponse> {
+  return this.post(`/notifications/workflows/${runId}/retry`, {});
+}
+
+async cancelWorkflow(runId: string): Promise<{ cancelled: boolean }> {
+  return this.post(`/notifications/workflows/${runId}/cancel`, {});
+}
+
+async getWorkflowStats(workspaceId: string): Promise<Record<string, number>> {
+  return this.get(`/notifications/workflows/stats?workspace_id=${workspaceId}`);
+}
+
+async listEvents(workspaceId: string, params?: Record<string, string>): Promise<EventOutboxResponse[]> {
+  const query = params ? `?${new URLSearchParams(params).toString()}` : '';
+  return this.get(`/notifications/events${query}`);
+}
+
+async getEvent(eventId: string): Promise<EventOutboxResponse> {
+  return this.get(`/notifications/events/${eventId}`);
+}
+
+async retryEvent(eventId: string): Promise<{ retried: boolean }> {
+  return this.post(`/notifications/events/${eventId}/retry`, {});
+}
+
+async getEventStats(workspaceId: string): Promise<Record<string, number>> {
+  return this.get(`/notifications/events/stats?workspace_id=${workspaceId}`);
+}
+
+async getUnreadCount(workspaceId: string): Promise<{ unread_count: number }> {
+  return this.get(`/notifications/unread-count?workspace_id=${workspaceId}`);
+}
+
+async markNotificationRead(notificationId: string): Promise<NotificationResponse> {
+  return this.post(`/notifications/${notificationId}/read`, {});
+}
+
+async markAllRead(workspaceId: string): Promise<{ marked_read: number }> {
+  return this.post('/notifications/read-all', { workspace_id: workspaceId });
+}
+
+async getPreferences(workspaceId: string): Promise<NotificationPreferenceResponse[]> {
+  return this.get(`/notifications/preferences?workspace_id=${workspaceId}`);
+}
+
+async updatePreference(workspaceId: string, category: string, data: { in_app_enabled?: boolean; email_enabled?: boolean }): Promise<NotificationPreferenceResponse> {
+  return this.put(`/notifications/preferences/${category}?workspace_id=${workspaceId}`, data);
+}
+
+async listRules(workspaceId: string, params?: Record<string, string>): Promise<NotificationRuleResponse[]> {
+  const query = params ? `?${new URLSearchParams(params).toString()}` : '';
+  return this.get(`/notifications/rules${query}`);
+}
+
+async createRule(workspaceId: string, data: NotificationRuleCreate): Promise<NotificationRuleResponse> {
+  return this.post(`/notifications/rules?workspace_id=${workspaceId}`, data);
+}
+
+async updateRule(ruleId: string, data: Partial<NotificationRuleCreate>): Promise<NotificationRuleResponse> {
+  return this.put(`/notifications/rules/${ruleId}`, data);
+}
+
+async deleteRule(ruleId: string): Promise<{ deleted: boolean }> {
+  return this.delete(`/notifications/rules/${ruleId}`);
+}
+
+async getDeliveries(notificationId: string): Promise<NotificationDeliveryResponse[]> {
+  return this.get(`/notifications/${notificationId}/deliveries`);
+}
+
+async retryDelivery(deliveryId: string): Promise<{ retried: boolean }> {
+  return this.post(`/notifications/deliveries/${deliveryId}/retry`, {});
+}
+
+async getDeliveryStats(workspaceId: string): Promise<Record<string, number>> {
+  return this.get(`/notifications/deliveries/stats?workspace_id=${workspaceId}`);
+}
+
+async createWorkflowRun(data: { workflow_id: string; workflow_version: string; input_payload: Record<string, unknown>; trigger_event_outbox_id?: string; trigger_event_type?: string; trigger_resource_type?: string; trigger_resource_id?: string; timeout_minutes?: number }): Promise<WorkflowRunResponse> {
+  return this.post('/notifications/workflows', data);
+}
+
+async listWorkflows(workspaceId: string, params?: Record<string, string>): Promise<WorkflowRunListResponse[]> {
+  const query = params ? `?${new URLSearchParams(params).toString()}` : '';
+  return this.get(`/notifications/workflows${query}`);
+}
+
+async getWorkflow(runId: string): Promise<WorkflowRunDetailResponse> {
+  return this.get(`/notifications/workflows/${runId}`);
+}
+
+async retryWorkflow(runId: string): Promise<WorkflowRunResponse> {
+  return this.post(`/notifications/workflows/${runId}/retry`, {});
+}
+
+async cancelWorkflow(runId: string): Promise<{ cancelled: boolean }> {
+  return this.post(`/notifications/workflows/${runId}/cancel`, {});
+}
+
+async getWorkflowStats(workspaceId: string): Promise<Record<string, number>> {
+  return this.get(`/notifications/workflows/stats?workspace_id=${workspaceId}`);
+}
+
+async listEvents(workspaceId: string, params?: Record<string, string>): Promise<EventOutboxResponse[]> {
+  const query = params ? `?${new URLSearchParams(params).toString()}` : '';
+  return this.get(`/notifications/events${query}`);
+}
+
+async getEvent(eventId: string): Promise<EventOutboxResponse> {
+  return this.get(`/notifications/events/${eventId}`);
+}
+
+async retryEvent(eventId: string): Promise<{ retried: boolean }> {
+  return this.post(`/notifications/events/${eventId}/retry`, {});
+}
+
+async getEventStats(workspaceId: string): Promise<Record<string, number>> {
+  return this.get(`/notifications/events/stats?workspace_id=${workspaceId}`);
+}

@@ -20,7 +20,11 @@ from app.models import (
     WorkspaceRole, AuthorizationStatus, AuthorizationType,
     Scan, ScanEvent, Finding, FindingEvidence, ScanTarget,
     ScanStatus, ScanProfile, ScanType, ScanEventType,
-    FindingSource, FindingSeverity, FindingConfidence, FindingStatus, FindingEvidenceType
+    FindingSource, FindingSeverity, FindingConfidence, FindingStatus, FindingEvidenceType,
+    Notification, NotificationPreference, NotificationRule, NotificationDelivery,
+    WorkflowRun, WorkflowRunEvent, EventOutbox,
+    NotificationChannel, NotificationPriority, DeliveryStatus, EventProcessingStatus,
+    RuleRecipientPolicy, WorkflowStatus, NotificationPriority
 )
 from app.schemas import (
     WorkspaceCreate,
@@ -236,3 +240,10 @@ from app.services.trends import TrendService
 from app.services.report_service import ReportService
 from app.services.report_export import ReportExportService
 from app.services.report_storage import ReportStorageService
+from app.services.event_outbox import EventOutboxService, emit_event, EventTypes
+from app.services.notification import NotificationService, PreferencesService
+from app.services.rules import RulesService
+from app.services.delivery import DeliveryService
+from app.services.workflow import WorkflowService, WorkflowRegistry
+from app.services.email_adapter import EmailAdapter
+from app.services.n8n_adapter import N8nAdapter, get_n8n_adapter

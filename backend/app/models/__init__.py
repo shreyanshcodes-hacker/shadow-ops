@@ -1716,3 +1716,367 @@ class ReportExport(Base):
 
     def __repr__(self) -> str:
         return f"<ReportExport(report_id={self.report_id}, format={self.format})>"
+
+
+# =============================================================================
+# Stage 11: Notification Models
+# =============================================================================
+
+class NotificationChannel(str, enum.Enum):
+    IN_APP = "in_app"
+    EMAIL = "email"
+
+
+class NotificationPriority(str, enum.Enum):
+    LOW = "low"
+    NORMAL = "normal"
+    HIGH = "high"
+    CRITICAL = "critical"
+
+
+class DeliveryStatus(str, enum.Enum):
+    PENDING = "pending"
+    SENT = "sent"
+    DELIVERED = "delivered"
+    FAILED = "failed"
+    BOUNCED = "bounced"
+    RETRYING = "retrying"
+
+
+class EventProcessingStatus(str, enum.Enum):
+    PENDING = "pending"
+    PROCESSING = "processing"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    DEAD_LETTER = "dead_letter"
+
+
+class RuleRecipientPolicy(str, enum.Enum):
+    ASSET_OWNERS = "asset_owners"
+    ASSET_MEMBERS = "asset_members"
+    WORKSPACE_ADMINS = "workspace_admins"
+    WORKSPACE_OWNERS = "workspace_owners"
+    SPECIFIC_USERS = "specific_users"
+    FINDING_ASSIGNEES = "finding_assignees"
+    REMEDIATION_APPROVERS = "remediation_approvers"
+
+
+class WorkflowStatus(str, enum.Enum):
+    PENDING = "pending"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+
+class EventOutbox(Base):
+    __tablename__ = "event_outbox"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False, index=True)
+    event_type: Mapped[str] = mapped_column(Text, nullable=False)
+    event_version: Mapped[str] = mapped_column(Text, default="1.0", nullable=False)
+    event_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), default=uuid.uuid4, nullable=False, unique=True, index=True)
+    correlation_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True, index=True)
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    actor_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), ForeignKey("profiles.id", ondelete="SET NULL"), nullable=True)
+    resource_type: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    resource_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
+    payload: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
+    status: Mapped[EventProcessingStatus] = mapped_column(SQLEnum(EventProcessingStatus), default=EventProcessingStatus.PENDING, nullable=False, index=True)
+    attempt_count: Mapped[int] = mapped_column(default=0, nullable=False)
+    max_attempts: Mapped[int] = mapped_column(default=5, nullable=False)
+    next_retry_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    last_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    last_error_category: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    processed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    # Relationships
+    workspace: Mapped["Workspace"] = relationship("Workspace")
+    actor: Mapped[Optional["Profile"]] = relationship("Profile", foreign_keys=[actor_id])
+
+    __table_args__ = (
+        Index("idx_event_outbox_workspace_status", "workspace_id", "status"),
+        Index("idx_event_outbox_status_next_retry", "status", "next_retry_at", postgresql_where=status.in_([EventProcessingStatus.PENDING, EventProcessingStatus.PROCESSING])),
+        Index("idx_event_outbox_correlation_id", "correlation_id"),
+        Index("idx_event_outbox_event_type", "event_type"),
+        Index("idx_event_outbox_created_at", "created_at"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<EventOutbox(id={self.id}, type={self.event_type}, status={self.status})>"
+
+
+class Notification(Base):
+    __tablename__ = "notifications"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("profiles.id", ondelete="CASCADE"), nullable=False, index=True)
+    type: Mapped[str] = mapped_column(Text, nullable=False)
+    title: Mapped[str] = mapped_column(Text, nullable=False)
+    message: Mapped[str] = mapped_column(Text, nullable=False)
+    reference_type: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    reference_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True, index=True)
+    channels: Mapped[List[str]] = mapped_column(ARRAY(Text), default=["in_app"], nullable=False)
+    read_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    sent_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    # Stage 11 additions
+    event_outbox_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), ForeignKey("event_outbox.id", ondelete="SET NULL"), nullable=True)
+    rule_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True, index=True)
+    priority: Mapped[str] = mapped_column(Text, default="normal", nullable=False)
+    action_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    action_label: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    deduplication_key: Mapped[Optional[str]] = mapped_column(Text, nullable=True, index=True)
+    expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+
+    # Relationships
+    workspace: Mapped["Workspace"] = relationship("Workspace")
+    user: Mapped["Profile"] = relationship("Profile", foreign_keys=[user_id])
+    event_outbox: Mapped[Optional["EventOutbox"]] = relationship("EventOutbox")
+
+    __table_args__ = (
+        Index("idx_notifications_user_id_read", "user_id", "read_at"),
+        Index("idx_notifications_ws_id_created", "workspace_id", "created_at"),
+        Index("idx_notifications_event_outbox_id", "event_outbox_id"),
+        Index("idx_notifications_rule_id", "rule_id"),
+        Index("idx_notifications_deduplication_key", "deduplication_key"),
+        Index("idx_notifications_priority", "priority"),
+        Index("idx_notifications_expires_at", "expires_at", postgresql_where=expires_at.is_not(None)),
+    )
+
+    def __repr__(self) -> str:
+        return f"<Notification(id={self.id}, type={self.type}, user_id={self.user_id})>"
+
+    @property
+    def is_read(self) -> bool:
+        return self.read_at is not None
+
+
+class NotificationPreferenceCategory(str, enum.Enum):
+    FINDING_CRITICAL_HIGH = "finding_critical_high"
+    FINDING_SEVERITY_CHANGED = "finding_severity_changed"
+    SCAN_FAILED = "scan_failed"
+    SCAN_COMPLETED = "scan_completed"
+    ATTACK_PATH_CREATED = "attack_path_created"
+    RISK_SCORE_CHANGED = "risk_score_changed"
+    REMEDIATION_AWAITING_APPROVAL = "remediation_awaiting_approval"
+    REMEDIATION_APPROVED = "remediation_approved"
+    REMEDIATION_REJECTED = "remediation_rejected"
+    REMEDIATION_APPLIED = "remediation_applied"
+    REMEDIATION_FAILED = "remediation_failed"
+    REMEDIATION_ROLLED_BACK = "remediation_rolled_back"
+    VERIFICATION_COMPLETED = "verification_completed"
+    VERIFICATION_FAILED = "verification_failed"
+    VERIFICATION_INCONCLUSIVE = "verification_inconclusive"
+    REPORT_GENERATED = "report_generated"
+    REPORT_GENERATION_FAILED = "report_generation_failed"
+    SECURITY_TEAM_COMPLETED = "security_team_completed"
+
+
+class NotificationPreference(Base):
+    __tablename__ = "notification_preferences"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("profiles.id", ondelete="CASCADE"), nullable=False, index=True)
+    category: Mapped[str] = mapped_column(Text, nullable=False)
+    in_app_enabled: Mapped[bool] = mapped_column(default=True, nullable=False)
+    email_enabled: Mapped[bool] = mapped_column(default=False, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    # Relationships
+    workspace: Mapped["Workspace"] = relationship("Workspace")
+    user: Mapped["Profile"] = relationship("Profile", foreign_keys=[user_id])
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "category", name="uq_notification_prefs_user_category"),
+        Index("idx_notification_prefs_workspace", "workspace_id"),
+        Index("idx_notification_prefs_user", "user_id"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<NotificationPreference(user_id={self.user_id}, category={self.category})>"
+
+
+class RuleRecipientPolicy(str, enum.Enum):
+    ASSET_OWNERS = "asset_owners"
+    ASSET_MEMBERS = "asset_members"
+    WORKSPACE_ADMINS = "workspace_admins"
+    WORKSPACE_OWNERS = "workspace_owners"
+    SPECIFIC_USERS = "specific_users"
+    FINDING_ASSIGNEES = "finding_assignees"
+    REMEDIATION_APPROVERS = "remediation_approvers"
+
+
+class NotificationRule(Base):
+    __tablename__ = "notification_rules"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False, index=True)
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    event_type: Mapped[str] = mapped_column(Text, nullable=False, index=True)
+    event_version: Mapped[str] = mapped_column(Text, default="1.0", nullable=False)
+    is_enabled: Mapped[bool] = mapped_column(default=True, nullable=False, index=True)
+    recipient_policy: Mapped[RuleRecipientPolicy] = mapped_column(SQLEnum(RuleRecipientPolicy), default=RuleRecipientPolicy.ASSET_OWNERS, nullable=False)
+    specific_recipient_ids: Mapped[List[uuid.UUID]] = mapped_column(ARRAY(UUID(as_uuid=True)), default=list, nullable=False)
+    severity_filter: Mapped[List[str]] = mapped_column(ARRAY(Text), default=["critical", "high", "medium", "low", "info"], nullable=False)
+    status_filter: Mapped[List[str]] = mapped_column(ARRAY(Text), default=["open", "triaged", "in_progress"], nullable=False)
+    enabled_channels: Mapped[List[str]] = mapped_column(ARRAY(Text), default=["in_app"], nullable=False)
+    deduplication_window_minutes: Mapped[int] = mapped_column(default=60, nullable=False)
+    rate_limit_per_hour: Mapped[int] = mapped_column(default=100, nullable=False)
+    require_acknowledgement: Mapped[bool] = mapped_column(default=False, nullable=False)
+    acknowledgement_timeout_hours: Mapped[Optional[int]] = mapped_column(nullable=True)
+    priority: Mapped[str] = mapped_column(Text, default="normal", nullable=False)
+    action_url_template: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    action_label_template: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("profiles.id", ondelete="RESTRICT"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    # Relationships
+    workspace: Mapped["Workspace"] = relationship("Workspace")
+    creator: Mapped["Profile"] = relationship("Profile", foreign_keys=[created_by])
+
+    __table_args__ = (
+        Index("idx_notification_rules_workspace", "workspace_id"),
+        Index("idx_notification_rules_event_type", "event_type"),
+        Index("idx_notification_rules_enabled", "is_enabled", postgresql_where=is_enabled == True),
+    )
+
+    def __repr__(self) -> str:
+        return f"<NotificationRule(id={self.id}, event_type={self.event_type})>"
+
+
+class DeliveryStatus(str, enum.Enum):
+    PENDING = "pending"
+    SENT = "sent"
+    DELIVERED = "delivered"
+    FAILED = "failed"
+    BOUNCED = "bounced"
+    RETRYING = "retrying"
+
+
+class NotificationDelivery(Base):
+    __tablename__ = "notification_deliveries"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    notification_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("notifications.id", ondelete="CASCADE"), nullable=False, index=True)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False, index=True)
+    channel: Mapped[str] = mapped_column(Text, nullable=False)
+    recipient_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("profiles.id", ondelete="CASCADE"), nullable=False, index=True)
+    status: Mapped[DeliveryStatus] = mapped_column(SQLEnum(DeliveryStatus), default=DeliveryStatus.PENDING, nullable=False, index=True)
+    attempt_count: Mapped[int] = mapped_column(default=0, nullable=False)
+    max_attempts: Mapped[int] = mapped_column(default=5, nullable=False)
+    next_retry_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    last_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    last_error_category: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    provider_message_id: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    provider_response: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    sent_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    delivered_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    failed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    # Relationships
+    notification: Mapped["Notification"] = relationship("Notification", backref="deliveries")
+    workspace: Mapped["Workspace"] = relationship("Workspace")
+    recipient: Mapped["Profile"] = relationship("Profile", foreign_keys=[recipient_id])
+
+    __table_args__ = (
+        Index("idx_notification_deliveries_notification", "notification_id"),
+        Index("idx_notification_deliveries_workspace_status", "workspace_id", "status"),
+        Index("idx_notification_deliveries_status_next_retry", "status", "next_retry_at", postgresql_where=status.in_([DeliveryStatus.PENDING, DeliveryStatus.RETRYING])),
+        Index("idx_notification_deliveries_recipient", "recipient_id"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<NotificationDelivery(id={self.id}, notification_id={self.notification_id}, channel={self.channel})>"
+
+
+class WorkflowStatus(str, enum.Enum):
+    PENDING = "pending"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+
+class WorkflowRun(Base):
+    __tablename__ = "workflow_runs"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False, index=True)
+    workflow_id: Mapped[str] = mapped_column(Text, nullable=False, index=True)
+    workflow_version: Mapped[str] = mapped_column(Text, nullable=False)
+    trigger_event_outbox_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), ForeignKey("event_outbox.id", ondelete="SET NULL"), nullable=True)
+    trigger_event_type: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    trigger_resource_type: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    trigger_resource_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
+    input_payload: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
+    status: Mapped[WorkflowStatus] = mapped_column(SQLEnum(WorkflowStatus), default=WorkflowStatus.PENDING, nullable=False, index=True)
+    current_action_index: Mapped[int] = mapped_column(default=0, nullable=False)
+    actions_executed: Mapped[list] = mapped_column(JSONB, default=list, nullable=False)
+    output_payload: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    error_category: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    failed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    timeout_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    idempotency_key: Mapped[str] = mapped_column(Text, nullable=False, unique=True, index=True)
+    created_by: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), ForeignKey("profiles.id", ondelete="SET NULL"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    # Relationships
+    workspace: Mapped["Workspace"] = relationship("Workspace")
+    trigger_event_outbox: Mapped[Optional["EventOutbox"]] = relationship("EventOutbox")
+    creator: Mapped[Optional["Profile"]] = relationship("Profile", foreign_keys=[created_by])
+    events: Mapped[List["WorkflowRunEvent"]] = relationship("WorkflowRunEvent", back_populates="workflow_run", cascade="all, delete-orphan")
+
+    __table_args__ = (
+        UniqueConstraint("idempotency_key", name="uq_workflow_runs_idempotency_key"),
+        Index("idx_workflow_runs_workspace", "workspace_id"),
+        Index("idx_workflow_runs_status", "status"),
+        Index("idx_workflow_runs_trigger_event", "trigger_event_outbox_id"),
+        Index("idx_workflow_runs_workflow_id", "workflow_id"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<WorkflowRun(id={self.id}, workflow_id={self.workflow_id}, status={self.status})>"
+
+
+class WorkflowRunEvent(Base):
+    __tablename__ = "workflow_run_events"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    workflow_run_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("workflow_runs.id", ondelete="CASCADE"), nullable=False, index=True)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False, index=True)
+    action_type: Mapped[str] = mapped_column(Text, nullable=False)
+    action_name: Mapped[str] = mapped_column(Text, nullable=False)
+    action_input: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
+    action_output: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    status: Mapped[str] = mapped_column(Text, nullable=False)
+    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    duration_ms: Mapped[Optional[int]] = mapped_column(nullable=True)
+    executed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    # Relationships
+    workflow_run: Mapped["WorkflowRun"] = relationship("WorkflowRun", back_populates="events")
+    workspace: Mapped["Workspace"] = relationship("Workspace")
+
+    __table_args__ = (
+        Index("idx_workflow_run_events_run", "workflow_run_id"),
+        Index("idx_workflow_run_events_workspace", "workspace_id"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<WorkflowRunEvent(id={self.id}, run_id={self.workflow_run_id}, action={self.action_name})>"
