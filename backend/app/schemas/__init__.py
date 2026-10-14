@@ -1527,3 +1527,222 @@ class VerificationDetailResponse(BaseSchema):
     comparisons: List[EvidenceComparisonResponse] = Field(default_factory=list)
     reviews: List[VerificationReviewResponse] = Field(default_factory=list)
     policy: Optional[VerificationPolicyResponse] = None
+
+
+# =============================================================================
+# Stage 10: Report Schemas
+# =============================================================================
+
+class ReportType(str, enum.Enum):
+    EXECUTIVE_SUMMARY = "executive_summary"
+    TECHNICAL_VULNERABILITY = "technical_vulnerability"
+    REMEDIATION_PROGRESS = "remediation_progress"
+    VERIFICATION_REGRESSION = "verification_regression"
+    ASSET_SECURITY_POSTURE = "asset_security_posture"
+
+
+class ReportFormat(str, enum.Enum):
+    PDF = "pdf"
+    JSON = "json"
+
+
+class ReportStatus(str, enum.Enum):
+    PENDING = "pending"
+    GENERATING = "generating"
+    READY = "ready"
+    FAILED = "failed"
+    EXPIRED = "expired"
+
+
+class ReportBase(BaseSchema):
+    workspace_id: UUID
+    report_type: ReportType
+    title: str = Field(min_length=1, max_length=255)
+    description: Optional[str] = None
+    format: ReportFormat = ReportFormat.PDF
+    period_start: Optional[datetime] = None
+    period_end: Optional[datetime] = None
+    included_asset_ids: List[UUID] = Field(default_factory=list)
+    severity_filters: List[str] = Field(default_factory=list)
+    filters: Dict[str, Any] = Field(default_factory=dict)
+
+
+class ReportCreate(ReportBase):
+    pass
+
+
+class ReportUpdate(BaseSchema):
+    title: Optional[str] = Field(default=None, min_length=1, max_length=255)
+    description: Optional[str] = None
+    status: Optional[ReportStatus] = None
+    error_message: Optional[str] = None
+    storage_object_id: Optional[UUID] = None
+    storage_path: Optional[str] = None
+    file_size_bytes: Optional[int] = None
+    checksum: Optional[str] = None
+    expires_at: Optional[datetime] = None
+
+
+class ReportResponse(ReportBase):
+    id: UUID
+    status: ReportStatus
+    schema_version: str
+    risk_engine_version: Optional[str] = None
+    verification_policy_version: Optional[str] = None
+    data_cutoff: datetime
+    source_record_references: Dict[str, Any]
+    completeness: Dict[str, Any]
+    limitations: List[str]
+    generated_by: UUID
+    storage_object_id: Optional[UUID] = None
+    storage_path: Optional[str] = None
+    file_size_bytes: Optional[int] = None
+    checksum: Optional[str] = None
+    error_message: Optional[str] = None
+    created_at: datetime
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    expires_at: Optional[datetime] = None
+    updated_at: datetime
+    generator: Optional["ProfileResponse"] = None
+
+
+class ReportListResponse(BaseSchema):
+    id: UUID
+    workspace_id: UUID
+    report_type: ReportType
+    title: str
+    format: ReportFormat
+    status: ReportStatus
+    period_start: Optional[datetime] = None
+    period_end: Optional[datetime] = None
+    generated_by: UUID
+    created_at: datetime
+    completed_at: Optional[datetime] = None
+
+
+class ReportSectionBase(BaseSchema):
+    report_id: UUID
+    section_key: str
+    section_title: str
+    section_order: int = 0
+    content: Dict[str, Any] = Field(default_factory=dict)
+    data_references: Dict[str, Any] = Field(default_factory=dict)
+
+
+class ReportSectionCreate(ReportSectionBase):
+    pass
+
+
+class ReportSectionResponse(ReportSectionBase):
+    id: UUID
+    workspace_id: UUID
+    created_at: datetime
+
+
+class ReportExportBase(BaseSchema):
+    report_id: UUID
+    format: ReportFormat
+
+
+class ReportExportCreate(ReportExportBase):
+    pass
+
+
+class ReportExportResponse(ReportExportBase):
+    id: UUID
+    workspace_id: UUID
+    storage_object_id: Optional[UUID] = None
+    storage_path: Optional[str] = None
+    file_size_bytes: Optional[int] = None
+    checksum: Optional[str] = None
+    generated_by: UUID
+    expires_at: Optional[datetime] = None
+    created_at: datetime
+
+
+# Dashboard Metrics Schemas
+class DashboardMetrics(BaseSchema):
+    workspace_id: UUID
+    # Asset metrics
+    total_assets: int
+    assets_with_authorization: int
+    assets_by_criticality: Dict[str, int]
+    assets_by_type: Dict[str, int]
+    assets_by_status: Dict[str, int]
+    # Scan metrics
+    total_scans: int
+    scans_completed: int
+    scans_failed: int
+    scans_running: int
+    latest_completed_scan_at: Optional[datetime] = None
+    # Finding metrics
+    open_findings_by_severity: Dict[str, int]
+    findings_by_status: Dict[str, int]
+    findings_by_source: Dict[str, int]
+    total_findings: int
+    # Risk metrics
+    current_risk_score: Optional[int] = None
+    risk_model_version: Optional[str] = None
+    attack_paths_by_status: Dict[str, int]
+    attack_paths_by_severity: Dict[str, int]
+    # Remediation metrics
+    remediation_proposals_by_status: Dict[str, int]
+    remediation_approved: int
+    remediation_applied: int
+    remediation_rejected: int
+    # Verification metrics
+    verification_jobs_by_status: Dict[str, int]
+    verification_outcomes: Dict[str, int]
+    regression_failures: int
+    # Timestamps
+    latest_verification_at: Optional[datetime] = None
+
+
+class TrendPoint(BaseSchema):
+    timestamp: datetime
+    value: float
+    label: Optional[str] = None
+
+
+class TrendData(BaseSchema):
+    metric_name: str
+    metric_label: str
+    unit: str
+    data_points: List[TrendPoint]
+    data_source: str
+    aggregation_method: str
+    time_window: str
+    limitations: Optional[str] = None
+
+
+class TrendResponse(BaseSchema):
+    trends: List[TrendData]
+    generated_at: datetime
+    data_cutoff: datetime
+
+
+# Report Generation Request
+class GenerateReportRequest(BaseSchema):
+    report_type: ReportType
+    title: str = Field(min_length=1, max_length=255)
+    description: Optional[str] = None
+    format: ReportFormat = ReportFormat.PDF
+    period_start: Optional[datetime] = None
+    period_end: Optional[datetime] = None
+    included_asset_ids: List[UUID] = Field(default_factory=list)
+    severity_filters: List[str] = Field(default_factory=list)
+    filters: Dict[str, Any] = Field(default_factory=dict)
+    include_ai_narrative: bool = False
+
+
+class GenerateReportResponse(BaseSchema):
+    report: ReportResponse
+    estimated_completion_seconds: Optional[int] = None
+
+
+# Report Detail Response
+class ReportDetailResponse(BaseSchema):
+    report: ReportResponse
+    sections: List[ReportSectionResponse] = Field(default_factory=list)
+    exports: List[ReportExportResponse] = Field(default_factory=list)

@@ -1650,3 +1650,227 @@ export interface VerificationPolicyCreate {
   policy_config: Record<string, unknown>;
   is_active?: boolean;
 }
+
+// =============================================================================
+// Stage 10: Report Types
+// =============================================================================
+
+export type ReportType = 
+  | 'executive_summary'
+  | 'technical_vulnerability'
+  | 'remediation_progress'
+  | 'verification_regression'
+  | 'asset_security_posture';
+
+export type ReportFormat = 'pdf' | 'json';
+
+export type ReportStatus = 
+  | 'pending'
+  | 'generating'
+  | 'ready'
+  | 'failed'
+  | 'expired';
+
+export interface DashboardMetrics {
+  workspace_id: string;
+  assets: {
+    total_assets: number;
+    assets_with_authorization: number;
+    assets_by_criticality: Record<string, number>;
+    assets_by_type: Record<string, number>;
+    assets_by_status: Record<string, number>;
+  };
+  scans: {
+    total_scans: number;
+    scans_completed: number;
+    scans_failed: number;
+    scans_running: number;
+    latest_completed_scan_at?: string;
+  };
+  findings: {
+    total_findings: number;
+    open_findings_by_severity: Record<string, number>;
+    findings_by_status: Record<string, number>;
+    findings_by_source: Record<string, number>;
+  };
+  risk: {
+    current_risk_score?: number;
+    risk_model_version?: string;
+    attack_paths_by_status: Record<string, number>;
+    attack_paths_by_severity: Record<string, number>;
+    total_attack_paths: number;
+  };
+  remediation: {
+    total_proposals: number;
+    remediation_proposals_by_status: Record<string, number>;
+    remediation_approved: number;
+    remediation_applied: number;
+    remediation_rejected: number;
+  };
+  verification: {
+    verification_jobs_by_status: Record<string, number>;
+    verification_outcomes: Record<string, number>;
+    regression_failures: number;
+    latest_verification_at?: string;
+  };
+  activity: {
+    latest_scan_at?: string;
+    latest_finding_at?: string;
+    latest_remediation_at?: string;
+  };
+  metadata: {
+    workspace_id: string;
+    generated_at: string;
+    data_cutoff: string;
+  };
+}
+
+export interface TrendDataPoint {
+  timestamp: string;
+  value: number;
+  label?: string;
+}
+
+export interface TrendSeries {
+  metric_name: string;
+  metric_label: string;
+  unit: string;
+  data_points: TrendDataPoint[];
+  data_source: string;
+  aggregation_method: string;
+  time_window: string;
+  limitations?: string;
+}
+
+export interface TrendResponse {
+  trends: TrendSeries[];
+  generated_at: string;
+  data_cutoff: string;
+}
+
+export interface ReportBase {
+  workspace_id: string;
+  report_type: ReportType;
+  title: string;
+  description?: string;
+  format: ReportFormat;
+  period_start?: string;
+  period_end?: string;
+  included_asset_ids: string[];
+  severity_filters: string[];
+  filters: Record<string, unknown>;
+}
+
+export interface GenerateReportRequest extends ReportBase {
+  include_ai_narrative?: boolean;
+}
+
+export interface ReportResponse extends ReportBase {
+  id: string;
+  status: ReportStatus;
+  schema_version: string;
+  risk_engine_version?: string;
+  verification_policy_version?: string;
+  data_cutoff: string;
+  source_record_references: Record<string, unknown>;
+  completeness: Record<string, unknown>;
+  limitations: string[];
+  generated_by: string;
+  storage_object_id?: string;
+  storage_path?: string;
+  file_size_bytes?: number;
+  checksum?: string;
+  error_message?: string;
+  created_at: string;
+  started_at?: string;
+  completed_at?: string;
+  expires_at?: string;
+  updated_at: string;
+  generator?: UserProfile;
+}
+
+export interface ReportListResponse {
+  id: string;
+  workspace_id: string;
+  report_type: ReportType;
+  title: string;
+  format: ReportFormat;
+  status: ReportStatus;
+  period_start?: string;
+  period_end?: string;
+  generated_by: string;
+  created_at: string;
+  completed_at?: string;
+}
+
+export interface ReportSectionResponse {
+  id: string;
+  report_id: string;
+  workspace_id: string;
+  section_key: string;
+  section_title: string;
+  section_order: number;
+  content: Record<string, unknown>;
+  data_references: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface ReportExportResponse {
+  id: string;
+  report_id: string;
+  workspace_id: string;
+  format: ReportFormat;
+  storage_object_id?: string;
+  storage_path?: string;
+  file_size_bytes?: number;
+  checksum?: string;
+  generated_by: string;
+  expires_at?: string;
+  created_at: string;
+}
+
+export interface ReportDetailResponse {
+  report: ReportResponse;
+  sections: ReportSectionResponse[];
+  exports: ReportExportResponse[];
+}
+
+export interface GenerateReportResponse {
+  report: ReportResponse;
+  estimated_completion_seconds?: number;
+}
+
+// Report API methods
+async listReports(workspaceId: string, params?: Record<string, string>): Promise<ReportListResponse[]> {
+  const query = params ? `?${new URLSearchParams(params).toString()}` : '';
+  return this.get(`/reports${query}`);
+}
+
+async getDashboardMetrics(workspaceId: string): Promise<DashboardMetrics> {
+  return this.get(`/reports/dashboard?workspace_id=${workspaceId}`);
+}
+
+async getDashboardTrends(workspaceId: string, params?: Record<string, string>): Promise<TrendResponse> {
+  const query = params ? `?${new URLSearchParams(params).toString()}` : '';
+  return this.get(`/reports/dashboard/trends${query}`);
+}
+
+async generateReport(data: GenerateReportRequest): Promise<GenerateReportResponse> {
+  return this.post('/reports', data);
+}
+
+async getReport(reportId: string): Promise<ReportResponse> {
+  return this.get(`/reports/${reportId}`);
+}
+
+async getReportDetail(reportId: string): Promise<ReportDetailResponse> {
+  return this.get(`/reports/${reportId}/detail`);
+}
+
+async exportReport(reportId: string, format: ReportFormat): Promise<ReportExportResponse> {
+  return this.post(`/reports/${reportId}/export?format=${format}`, {});
+}
+
+async getReportDownloadUrl(reportId: string, exportId: string): Promise<{ download_url: string; expires_in: number }> {
+  return this.get(`/reports/${reportId}/download?export_id=${exportId}`);
+}

@@ -1,100 +1,128 @@
 'use client';
 
 import { cn } from '@/lib/utils';
-import { forwardRef } from 'react';
+import { Slot } from '@radix-ui/react-slot';
+import { cva, type VariantProps } from 'class-variance-authority';
 
-interface TabsProps {
-  value: string;
-  onValueChange: (value: string) => void;
-  children: React.ReactNode;
-  className?: string;
-}
-
-export function Tabs({ value, onValueChange, children, className }: TabsProps) {
-  return (
-    <div 
-      className={cn('w-full', className)}
-      data-value={value}
-      onValueChange={(e: React.SyntheticEvent) => {
-        const target = e.target as HTMLElement;
-        const val = target.getAttribute('data-value');
-        if (val) onValueChange(val);
-      }}
-    >
-      {children}
-    </div>
-  );
-}
-
-interface TabsListProps {
-  children: React.ReactNode;
-  className?: string;
-}
-
-export function TabsList({ children, className }: TabsListProps) {
-  return (
-    <div 
-      className={cn(
-        'inline-flex h-10 items-center justify-center rounded-lg bg-background-tertiary p-1 text-foreground-muted',
-        className
-      )}
-      role="tablist"
-      aria-orientation="horizontal"
-    >
-      {children}
-    </div>
-  );
-}
-
-interface TabsTriggerProps {
-  value: string;
-  children: React.ReactNode;
-  disabled?: boolean;
-  className?: string;
-}
-
-export const TabsTrigger = forwardRef<HTMLButtonElement, TabsTriggerProps>(
-  ({ value, children, disabled, className, ...props }, ref) => {
-    const isActive = false; // Will be set by parent Tabs
-    return (
-      <button
-        ref={ref}
-        type="button"
-        data-value={value}
-        disabled={disabled}
-        role="tab"
-        aria-selected={isActive}
-        aria-disabled={disabled}
-        className={cn(
-          'inline-flex items-center justify-center whitespace-nowrap rounded-md px-3 py-1.5 text-sm font-medium ring-offset-background transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-DEFAULT focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 data-[state=active]:bg-background-DEFAULT data-[state=active]:text-foreground-DEFAULT data-[state=active]:shadow-sm',
-          className
-        )}
-        {...props}
-      >
-        {children}
-      </button>
-    )
+const tabsVariants = cva(
+  'inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium ring-offset-white transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50',
+  {
+    variants: {
+      variant: {
+        default: 'bg-gray-100 text-gray-900 hover:bg-gray-200 data-[state=active]:bg-white data-[state=active]:shadow-sm',
+        outline: 'border border-gray-300 bg-white text-gray-900 hover:bg-gray-50 data-[state=active]:bg-gray-100',
+      },
+    },
+    defaultVariants: {
+      variant: 'default',
+    },
   }
 );
-TabsTrigger.displayName = 'TabsTrigger';
 
-interface TabsContentProps {
-  value: string;
+interface TabsProps {
+  defaultValue?: string;
+  onValueChange?: (value: string) => void;
+  value?: string;
   children: React.ReactNode;
   className?: string;
-  forceMount?: boolean;
+  orientation?: 'horizontal' | 'vertical';
 }
 
-export function TabsContent({ value, children, className, forceMount }: TabsContentProps) {
-  // We'll use a simple approach - the parent Tabs manages the active value
-  // This is a simplified version - in production you'd use a context
+export function Tabs({ defaultValue, onValueChange, value, children, className, orientation = 'horizontal' }: TabsProps) {
+  const [activeValue, setActiveValue] = useState(defaultValue || '');
+
+  const handleValueChange = (newValue: string) => {
+    setActiveValue(newValue);
+    onValueChange?.(newValue);
+  };
+
   return (
-    <div 
-      className={cn('mt-2 ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-DEFAULT focus-visible:ring-offset-2', className)}
-      role="tabpanel"
-      data-value={value}
+    <div className={cn(className)}>
+      <TabsList
+        role="tablist"
+        aria-orientation={orientation}
+        value={value || activeValue}
+        onValueChange={handleValueChange}
+        className={cn(
+          'inline-flex h-10 items-center justify-center rounded-md bg-gray-100 p-1 text-gray-900',
+          orientation === 'vertical' ? 'flex-col w-[180px]' : 'flex-row'
+        )}
+      >
+        {React.Children.map(children, child => {
+          if (!React.isValidElement(child)) return null;
+          return React.cloneElement(child, {
+            value: child.props.value,
+            onClick: () => handleValueChange(child.props.value),
+            selected: (value || activeValue) === child.props.value,
+          });
+        })}
+      </TabsList>
+      <TabsContent value={value || activeValue}>
+        {React.Children.map(children, child => {
+          if (!React.isValidElement(child)) return null;
+          return React.cloneElement(child, {
+            value: child.props.value,
+          });
+        })}
+      </TabsContent>
+    </div>
+  );
+}
+
+function TabsList({ children, className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
+  return (
+    <div
+      role="tablist"
+      aria-orientation="horizontal"
+      className={cn(
+        'inline-flex h-10 items-center justify-center rounded-md bg-gray-100 p-1 text-gray-900',
+        className
+      )}
+      {...props}
     >
       {children}
     </div>
   );
 }
+
+function TabsTrigger({ children, value, selected, onClick, className, disabled, ...props }: 
+  React.ButtonHTMLAttributes<HTMLButtonElement> & { value: string; selected?: boolean }) {
+  return (
+    <button
+      role="tab"
+      aria-selected={selected}
+      value={value}
+      onClick={onClick}
+      disabled={disabled}
+      className={cn(
+        'inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium ring-offset-white transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50',
+        selected
+          ? 'bg-white text-gray-900 shadow-sm'
+          : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100',
+        className
+      )}
+      {...props}
+    >
+      {children}
+    </button>
+  );
+}
+
+function TabsContent({ children, value, className, ...props }: React.HTMLAttributes<HTMLDivElement> & { value: string }) {
+  return (
+    <div
+      role="tabpanel"
+      hidden={false}
+      className={cn(
+        'mt-2 ring-offset-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
+        className
+      )}
+      {...props}
+    >
+      {children}
+    </div>
+  );
+}
+
+TabsTrigger.displayName = 'TabsTrigger';
+TabsContent.displayName = 'TabsContent';

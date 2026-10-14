@@ -1,368 +1,750 @@
 'use client';
 
-import { Shield, Zap, GitBranch, BarChart3, AlertTriangle, CheckCircle, Clock, Users, Plus, Search, Bot, RotateCcw, Eye } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import {
+  Shield, GitBranch, AlertTriangle, BarChart3, CheckCircle, Clock,
+  Users, Plus, Search, Bot, RotateCcw, Eye, Download, FileText,
+  TrendingUp, TrendingDown, Minus, AlertCircle, Zap
+} from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
 import { Badge, StatusBadge } from '@/components/ui/Badge';
 import { Skeleton, CardSkeleton } from '@/components/ui/Skeleton';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Button } from '@/components/ui/Button';
-import { useAuth } from '@/hooks/useAuth';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/Select';
+import { useAuthContext } from '@/components/providers/AuthProvider';
 import { api } from '@/lib/api';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { DashboardMetrics, TrendResponse, TrendSeries, TrendDataPoint } from '@/lib/api';
+import { useQuery } from '@tanstack/react-query';
 import { clsx } from 'clsx';
 import Link from 'next/link';
-import { formatDistanceToNow, format } from 'date-fns';
+import { formatDistanceToNow, format, subDays, startOfDay, endOfDay } from 'date-fns';
+import {
+  LineChart, Line, AreaChart, Area, XAxis, YAxis, CartesianGrid,
+  Tooltip, ResponsiveContainer, Legend, BarChart, Bar, Cell,
+  PieChart, Pie, Cell as PieCell
+} from 'recharts';
 
-interface Workspace {
-  id: string;
-  name: string;
-  slug: string;
-  plan: string;
-  role: string;
-  created_at: string;
-}
-
-interface Asset {
-  id: string;
-  name: string;
-  type: string;
-  criticality: string;
-  status: string;
-  created_at: string;
-}
-
-interface SecurityTeamRunListResponse {
-  id: string;
-  workspace_id: string;
-  asset_id: string;
-  scan_id: string;
-  status: string;
-  requested_by: string;
-  started_at: string | null;
-  completed_at: string | null;
-  orchestration_version: string;
-  team_summary: Record<string, unknown>;
-  confidence: number | null;
-  created_at: string;
-  updated_at: string;
-}
-
-const STATUS_CONFIG: Record<string, { label: string; color: string }> = {
-  succeeded: { label: 'Succeeded', color: 'success' },
-  partial: { label: 'Partial', color: 'warning' },
-  failed: { label: 'Failed', color: 'error' },
-  running: { label: 'Running', color: 'info' },
-  queued: { label: 'Queued', color: 'secondary' },
-  canceled: { label: 'Canceled', color: 'secondary' },
+const SEVERITY_COLORS: Record<string, string> = {
+  critical: '#ef4444',
+  high: '#f97316',
+  medium: '#eab308',
+  low: '#22c55e',
+  info: '#3b82f6',
 };
 
+const STATUS_COLORS: Record<string, string> = {
+  completed: '#22c55e',
+  failed: '#ef4444',
+  running: '#3b82f6',
+  queued: '#6b7280',
+  cancelled: '#9ca3af',
+  partial: '#f97316',
+};
+
+const REMEDIATION_STATUS_COLORS: Record<string, string> = {
+  DRAFT: '#9ca3af',
+  GENERATING: '#3b82f6',
+  PROPOSED: '#eab308',
+  VALIDATING: '#3b82f6',
+  VALIDATION_FAILED: '#ef4444',
+  AWAITING_APPROVAL: '#f97316',
+  APPROVED: '#22c55e',
+  APPLYING: '#3b82f6',
+  APPLIED: '#22c55e',
+  REJECTED: '#ef4444',
+  EXPIRED: '#9ca3af',
+  ROLLED_BACK: '#a855f7',
+  FAILED: '#ef4444',
+};
+
+const VERIFICATION_STATUS_COLORS: Record<string, string> = {
+  QUEUED: '#9ca3af',
+  RUNNING: '#3b82f6',
+  BASELINE_CHECK: '#3b82f6',
+  RESCANNING: '#3b82f6',
+  REGRESSION_CHECK: '#3b82f6',
+  COMPARING_EVIDENCE: '#3b82f6',
+  PASSED_PENDING_REVIEW: '#22c55e',
+  VERIFIED: '#22c55e',
+  FAILED: '#ef4444',
+  INCONCLUSIVE: '#eab308',
+  BLOCKED: '#f97316',
+  CANCELED: '#9ca3af',
+};
+
+const VERIFICATION_OUTCOME_COLORS: Record<string, string> = {
+  VERIFIED_CANDIDATE: '#22c55e',
+  FAILED: '#ef4444',
+  INCONCLUSIVE: '#eab308',
+  BLOCKED: '#f97316',
+};
+
+const RISK_BAND_COLORS: Record<string, string> = {
+  critical: '#ef4444',
+  high: '#f97316',
+  medium: '#eab308',
+  low: '#22c55e',
+  informational: '#3b82f6',
+};
+
+const CHART_COLORS = ['#3b82f6', '#ef4444', '#f97316', '#eab308', '#22c55e', '#a855f7', '#06b6d4', '#f472b6'];
+
+interface SeverityStat {
+  severity: string;
+  count: number;
+  color: string;
+}
+
+interface TrendChartData {
+  label: string;
+  [key: string]: string | number;
+}
+
 export default function DashboardPage() {
-  const { profile } = useAuth();
-  const queryClient = useQueryClient();
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const { currentWorkspace } = useAuthContext();
+  const [timeRange, setTimeRange] = useState('30d');
+  const [metrics, setMetrics] = useState<DashboardMetrics | null>(null);
+  const [trends, setTrends] = useState<TrendResponse | null>(null);
+  const [metricsLoading, setMetricsLoading] = useState(true);
+  const [trendsLoading, setTrendsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  const { data: workspaces, isLoading: workspacesLoading } = useQuery({
-    queryKey: ['workspaces'],
-    queryFn: () => api.listWorkspaces(),
-    staleTime: 5 * 60 * 1000,
-  });
+  useEffect(() => {
+    if (!currentWorkspace) return;
+    fetchData();
+  }, [currentWorkspace, timeRange]);
 
-  const { data: assets, isLoading: assetsLoading } = useQuery({
-    queryKey: ['assets', workspaces?.[0]?.id],
-    queryFn: () => workspaces?.[0]?.id ? api.listAssets(workspaces[0].id) : [],
-    enabled: !!workspaces?.[0]?.id,
-    staleTime: 5 * 60 * 1000,
-  });
+  const getPeriodDates = () => {
+    const end = new Date();
+    let start: Date;
+    switch (timeRange) {
+      case '7d': start = subDays(end, 7); break;
+      case '30d': start = subDays(end, 30); break;
+      case '90d': start = subDays(end, 90); break;
+      case '1y': start = subDays(end, 365); break;
+      default: start = subDays(end, 30);
+    }
+    return { start: startOfDay(start), end: endOfDay(end) };
+  };
 
-  const { data: securityTeamRuns, isLoading: teamRunsLoading } = useQuery({
-    queryKey: ['security-team-runs', workspaces?.[0]?.id],
-    queryFn: () => workspaces?.[0]?.id ? api.listSecurityTeamRuns(workspaces[0].id) : [],
-    enabled: !!workspaces?.[0]?.id,
-    staleTime: 30 * 1000,
-  });
+  const fetchData = async () => {
+    if (!currentWorkspace) return;
+    setMetricsLoading(true);
+    setTrendsLoading(true);
+    setError(null);
 
-  const stats = [
-    { label: 'Workspaces', value: workspaces?.length || 0, icon: Shield, color: 'text-accent-DEFAULT' },
-    { label: 'Assets Monitored', value: assets?.length || 0, icon: GitBranch, color: 'text-status-success' },
-    { label: 'Active Workspace', value: workspaces?.[0]?.name || 'None', icon: Users, sub: workspaces?.[0]?.slug, color: 'text-foreground-DEFAULT' },
-    { label: 'Security Team', value: securityTeamRuns?.length || 0, icon: Bot, sub: 'Runs', color: 'text-foreground-muted' },
+    try {
+      const { start, end } = getPeriodDates();
+      const params = {
+        workspace_id: currentWorkspace.id,
+        period_start: start.toISOString(),
+        period_end: end.toISOString(),
+      };
+
+      const [metricsData, trendsData] = await Promise.all([
+        api.getDashboardMetrics(currentWorkspace.id),
+        api.getDashboardTrends(currentWorkspace.id, params),
+      ]);
+
+      setMetrics(metricsData);
+      setTrends(trendsData);
+    } catch (err: any) {
+      setError(err.message || 'Failed to load dashboard data');
+    } finally {
+      setMetricsLoading(false);
+      setTrendsLoading(false);
+    }
+  };
+
+  const handleTimeRangeChange = (value: string) => {
+    setTimeRange(value);
+    const params = new URLSearchParams(searchParams);
+    params.set('range', value);
+    router.push(`/dashboard?${params.toString()}`);
+  };
+
+  const timeRangeOptions = [
+    { value: '7d', label: 'Last 7 days' },
+    { value: '30d', label: 'Last 30 days' },
+    { value: '90d', label: 'Last 90 days' },
+    { value: '1y', label: 'Last year' },
   ];
 
-  if (workspacesLoading) {
+  if (!currentWorkspace) {
+    return (
+      <div className="p-6 text-center">
+        <Shield className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+        <h1 className="text-2xl font-bold text-gray-900">Welcome to ShadowOps</h1>
+        <p className="text-gray-500 mt-2">Select a workspace to view your security dashboard</p>
+      </div>
+    );
+  }
+
+  if (metricsLoading) {
     return (
       <div className="space-y-6 animate-pulse">
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-          {Array.from({ length: 4 }).map((_, i) => (
-            <CardSkeleton key={i} />
-          ))}
+          {Array.from({ length: 4 }).map((_, i) => <CardSkeleton key={i} />)}
         </div>
+        <CardSkeleton className="min-h-[300px]" />
         <CardSkeleton className="min-h-[300px]" />
         <CardSkeleton className="min-h-[300px]" />
       </div>
     );
   }
 
-  if (!workspaces || workspaces.length === 0) {
+  if (error) {
     return (
       <div className="space-y-6">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-          <div>
-            <h1 className="text-2xl font-bold text-foreground-DEFAULT">Dashboard</h1>
-            <p className="text-sm text-foreground-muted mt-1">
-              Welcome to your security operations center
-            </p>
-          </div>
+        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
+          {error}
+          <Button className="mt-2" onClick={fetchData}>Retry</Button>
         </div>
-
-        <EmptyState
-          icon="Shield"
-          title="No Workspaces Yet"
-          description="Create your first workspace to start monitoring your assets and security posture."
-          action={
-            <Button onClick={() => {}} className="w-full sm:w-auto">
-              <Plus className="h-4 w-4 mr-2" />
-              Create Workspace
-            </Button>
-          }
-        />
       </div>
     );
   }
 
-  const activeWorkspace = workspaces[0];
-  const latestTeamRun = securityTeamRuns?.[0];
+  if (!metrics) {
+    return (
+      <div className="p-6 text-center">
+        <p className="text-gray-500">Loading dashboard...</p>
+      </div>
+    );
+  }
+
+  // Transform data for charts
+  const severityStats: SeverityStat[] = [
+    { severity: 'Critical', count: metrics.findings.open_findings_by_severity.critical || 0, color: SEVERITY_COLORS.critical },
+    { severity: 'High', count: metrics.findings.open_findings_by_severity.high || 0, color: SEVERITY_COLORS.high },
+    { severity: 'Medium', count: metrics.findings.open_findings_by_severity.medium || 0, color: SEVERITY_COLORS.medium },
+    { severity: 'Low', count: metrics.findings.open_findings_by_severity.low || 0, color: SEVERITY_COLORS.low },
+    { severity: 'Info', count: metrics.findings.open_findings_by_severity.info || 0, color: SEVERITY_COLORS.info },
+  ];
+
+  const openFindingsTotal = severityStats.reduce((sum, s) => sum + s.count, 0);
+
+  // Prepare trend chart data
+  const findingTrendSeries = trends?.trends.find(t => t.metric_name === 'total_findings');
+  const openFindingTrendSeries = trends?.trends.find(t => t.metric_name === 'open_findings');
+  const riskTrendSeries = trends?.trends.find(t => t.metric_name === 'risk_score');
+  const scanCompletedTrend = trends?.trends.find(t => t.metric_name === 'scans_completed');
+  const scanFailedTrend = trends?.trends.find(t => t.metric_name === 'scans_failed');
+  const newFindingsTrend = trends?.trends.find(t => t.metric_name === 'new_findings');
+  const resolvedFindingsTrend = trends?.trends.find(t => t.metric_name === 'resolved_findings');
+  const remediationProposedTrend = trends?.trends.find(t => t.metric_name === 'remediation_proposed');
+  const remediationApprovedTrend = trends?.trends.find(t => t.metric_name === 'remediation_approved');
+  const remediationAppliedTrend = trends?.trends.find(t => t.metric_name === 'remediation_applied');
+  const verificationVerifiedTrend = trends?.trends.find(t => t.metric_name === 'verification_verified');
+  const verificationFailedTrend = trends?.trends.find(t => t.metric_name === 'verification_failed');
+
+  const buildTrendChartData = (series?: TrendSeries, color?: string): TrendChartData[] => {
+    if (!series || series.data_points.length === 0) return [];
+    return series.data_points.map((point, index) => ({
+      date: point.label || point.timestamp.split('T')[0],
+      value: point.value,
+      color: color || CHART_COLORS[index % CHART_COLORS.length],
+    }));
+  };
+
+  const findingTrendData = buildTrendChartData(findingTrendSeries, '#3b82f6');
+  const openFindingTrendData = buildTrendChartData(openFindingTrendSeries, '#ef4444');
+  const riskTrendData = buildTrendChartData(riskTrendSeries, '#a855f7');
+  const scanTrendData = scanCompletedTrend && scanFailedTrend ? 
+    scanCompletedTrend.data_points.map((point, i) => ({
+      date: point.label || point.timestamp.split('T')[0],
+      completed: point.value,
+      failed: scanFailedTrend.data_points[i]?.value || 0,
+    })) : [];
+  const findingFlowData = newFindingsTrend && resolvedFindingsTrend ?
+    newFindingsTrend.data_points.map((point, i) => ({
+      date: point.label || point.timestamp.split('T')[0],
+      new: point.value,
+      resolved: resolvedFindingsTrend.data_points[i]?.value || 0,
+    })) : [];
+  const remediationTrendData = remediationProposedTrend && remediationApprovedTrend && remediationAppliedTrend ?
+    remediationProposedTrend.data_points.map((point, i) => ({
+      date: point.label || point.timestamp.split('T')[0],
+      proposed: point.value,
+      approved: remediationApprovedTrend.data_points[i]?.value || 0,
+      applied: remediationAppliedTrend.data_points[i]?.value || 0,
+    })) : [];
+  const verificationTrendData = verificationVerifiedTrend && verificationFailedTrend ?
+    verificationVerifiedTrend.data_points.map((point, i) => ({
+      date: point.label || point.timestamp.split('T')[0],
+      verified: point.value,
+      failed: verificationFailedTrend.data_points[i]?.value || 0,
+    })) : [];
+
+  const riskScore = metrics.risk.current_risk_score ?? 0;
+  const riskBand = riskScore >= 70 ? 'critical' : riskScore >= 50 ? 'high' : riskScore >= 30 ? 'medium' : riskScore > 0 ? 'low' : 'informational';
+
+  const stats = [
+    {
+      label: 'Assets Monitored',
+      value: metrics.assets.total_assets,
+      sub: `${metrics.assets.assets_with_authorization} authorized`,
+      icon: GitBranch,
+      color: 'text-status-success',
+      trend: metrics.assets.assets_with_authorization === metrics.assets.total_assets ? 'good' : 'warning',
+    },
+    {
+      label: 'Open Findings',
+      value: openFindingsTotal,
+      sub: `${metrics.findings.open_findings_by_severity.critical || 0} critical, ${metrics.findings.open_findings_by_severity.high || 0} high`,
+      icon: AlertTriangle,
+      color: openFindingsTotal > 0 ? 'text-status-error' : 'text-status-success',
+      trend: openFindingsTotal > 0 ? 'bad' : 'good',
+    },
+    {
+      label: 'Risk Score',
+      value: riskScore || 'N/A',
+      sub: `Band: ${riskBand}`,
+      icon: BarChart3,
+      color: riskScore > 0 ? `text-[${RISK_BAND_COLORS[riskBand]}]` : 'text-foreground-muted',
+      trend: riskScore >= 50 ? 'bad' : riskScore > 0 ? 'warning' : 'good',
+    },
+    {
+      label: 'Active Attack Paths',
+      value: metrics.risk.attack_paths_by_status.active || 0,
+      sub: `${metrics.risk.total_attack_paths} total paths`,
+      icon: TrendingUp,
+      color: metrics.risk.attack_paths_by_status.active > 0 ? 'text-status-warning' : 'text-status-success',
+      trend: metrics.risk.attack_paths_by_status.active > 0 ? 'bad' : 'good',
+    },
+  ];
 
   return (
-    <div className="space-y-6">
+    <div className="p-6 space-y-6">
+      {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-foreground-DEFAULT">Dashboard</h1>
-          <p className="text-sm text-foreground-muted mt-1">
-            {activeWorkspace ? `Workspace: ${activeWorkspace.name}` : 'No active workspace'}
+          <h1 className="text-2xl font-bold text-gray-900">Security Dashboard</h1>
+          <p className="text-gray-500 mt-1">
+            Workspace: {currentWorkspace.name} • Data as of {format(new Date(), 'MMM d, yyyy HH:mm')}
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          <Badge variant="success" dot>System Operational</Badge>
+        <div className="flex items-center gap-3">
+          <Select value={timeRange} onValueChange={handleTimeRangeChange}>
+            <SelectTrigger className="w-[160px]">
+              <SelectValue placeholder="Time range" />
+            </SelectTrigger>
+            <SelectContent>
+              {timeRangeOptions.map(opt => (
+                <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Badge variant={metrics.scans.scans_running > 0 ? 'info' : 'success'} dot>
+            {metrics.scans.scans_running > 0 ? 'Scan Running' : 'System Operational'}
+          </Badge>
         </div>
       </div>
 
+      {/* Key Metrics Cards */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         {stats.map((stat) => (
           <Card key={stat.label} className="card-hover">
             <CardContent className="p-4">
               <div className="flex items-start justify-between">
                 <div>
-                  <p className="text-xs font-medium text-foreground-muted uppercase tracking-wide">
-                    {stat.label}
-                  </p>
-                  <p className="text-3xl font-bold text-foreground-DEFAULT mt-1">
-                    {typeof stat.value === 'string' ? stat.value : stat.value}
-                  </p>
-                  {stat.sub && (
-                    <p className="text-xs text-foreground-subtle mt-1">{stat.sub}</p>
-                  )}
+                  <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">{stat.label}</p>
+                  <p className="text-3xl font-bold text-gray-900 mt-1">{stat.value}</p>
+                  <p className="text-xs text-gray-500 mt-1">{stat.sub}</p>
                 </div>
                 <div className="p-2 rounded-lg bg-accent-glow">
                   <stat.icon className={`h-6 w-6 ${stat.color}`} />
                 </div>
+              </div>
+              <div className="mt-3 flex items-center gap-2 text-xs">
+                <span className={`px-2 py-0.5 rounded-full ${
+                  stat.trend === 'good' ? 'bg-green-100 text-green-800' :
+                  stat.trend === 'bad' ? 'bg-red-100 text-red-800' :
+                  'bg-yellow-100 text-yellow-800'
+                }`}>
+                  {stat.trend === 'good' && <CheckCircle className="h-3 w-3 mr-1" />}
+                  {stat.trend === 'bad' && <AlertCircle className="h-3 w-3 mr-1" />}
+                  {stat.trend === 'warning' && <AlertTriangle className="h-3 w-3 mr-1" />}
+                  {stat.trend === 'good' ? 'Healthy' : stat.trend === 'bad' ? 'Action Needed' : 'Review'}
+                </span>
               </div>
             </CardContent>
           </Card>
         ))}
       </div>
 
-      {/* Security Team Section */}
-      <Card>
-        <CardHeader className="flex flex-row items-center justify-between">
-          <CardTitle>Latest Security Team Run</CardTitle>
-          <div className="flex items-center gap-2">
-            {latestTeamRun && latestTeamRun.status === 'running' && (
-              <Badge variant="info" dot className="animate-pulse">
-                Running
-              </Badge>
-            )}
-            {latestTeamRun && (
-              <Link href={`/security-team/${latestTeamRun.id}`} className="text-sm text-accent-DEFAULT hover:text-accent-light font-medium">
-                View Details →
-              </Link>
-            )}
-          </div>
-        </CardHeader>
-        <CardContent>
-          {teamRunsLoading ? (
-            <Skeleton className="h-32 w-full" />
-          ) : !latestTeamRun ? (
-            <div className="text-center py-8">
-              <Bot className="h-12 w-12 text-foreground-muted mx-auto mb-4" />
-              <h3 className="text-lg font-medium text-foreground-DEFAULT mb-2">No Security Team Runs</h3>
-              <p className="text-foreground-muted mb-4">Start a Security Team analysis to get multi-agent security assessment.</p>
-              <Button asChild>
-                <Link href="/security-team">
-                  <Plus className="h-4 w-4 mr-2" />
-                  Start Team Run
-                </Link>
-              </Button>
-            </div>
-          ) : (
-            <div className="space-y-4">
-              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 p-4 bg-background-tertiary/50 rounded-lg">
-                <div className="flex items-center gap-4">
-                  <div className="p-2 rounded-lg bg-accent-glow">
-                    <Bot className="h-5 w-5 text-accent-DEFAULT" />
-                  </div>
-                  <div>
-                    <div className="flex items-center gap-3">
-                      <span className="font-mono text-sm text-foreground-DEFAULT">{latestTeamRun.id.toString().slice(0, 8)}...</span>
-                      <StatusBadge status={latestTeamRun.status as any} />
-                    </div>
-                    <p className="text-sm text-foreground-muted mt-1">
-                      Asset: <span className="font-mono">{latestTeamRun.asset_id.toString().slice(0, 12)}...</span>
-                      {' • '}
-                      Scan: <span className="font-mono">{latestTeamRun.scan_id.toString().slice(0, 12)}...</span>
-                    </p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-4 text-sm">
-                  {latestTeamRun.confidence !== null && (
-                    <span className="text-foreground-muted">Confidence: <span className="font-mono text-foreground-DEFAULT">{Math.round(latestTeamRun.confidence * 100)}%</span></span>
-                  )}
-                  {latestTeamRun.started_at && (
-                    <span className="text-foreground-muted">Started: <span className="font-mono text-foreground-DEFAULT">{formatDistanceToNow(new Date(latestTeamRun.started_at), { addSuffix: true })}</span></span>
-                  )}
-                  {latestTeamRun.completed_at && (
-                    <span className="text-foreground-muted">Completed: <span className="font-mono text-foreground-DEFAULT">{formatDistanceToNow(new Date(latestTeamRun.completed_at), { addSuffix: true })}</span></span>
-                  )}
-                  {latestTeamRun.status === 'running' && latestTeamRun.started_at && (
-                    <span className="text-foreground-muted">Running for: <span className="font-mono text-foreground-DEFAULT">{formatDistanceToNow(new Date(latestTeamRun.started_at))}</span></span>
-                  )}
-                </div>
-              </div>
-
-              {latestTeamRun.team_summary && Object.keys(latestTeamRun.team_summary).length > 0 && (
-                <div className="p-3 bg-background-tertiary/50 rounded-lg">
-                  <p className="text-sm font-medium text-foreground-muted mb-2">Agent Status</p>
-                  <div className="flex flex-wrap gap-2">
-                    {(['recon', 'vulnerability_analyst', 'attack_path_analyst', 'risk_analyst', 'security_reviewer'] as const).map((agentKey) => {
-                      const summary = latestTeamRun.team_summary as { completed_agents?: string[]; failed_agents?: string[] } | undefined;
-                      const completed = summary?.completed_agents?.includes(agentKey) || false;
-                      const failed = summary?.failed_agents?.includes(agentKey) || false;
-                      const running = !completed && !failed && latestTeamRun.status === 'running';
-                      const label = agentKey.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-                      return (
-                        <Badge 
-                          key={agentKey} 
-                          variant={completed ? 'success' : failed ? 'error' : running ? 'info' : 'outline'}
-                          className="gap-1"
-                          dot
-                        >
-                          {label}
-                        </Badge>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-
-              <div className="flex gap-2">
-                <Button variant="outline" asChild>
-                  <Link href={`/security-team/${latestTeamRun.id}`}>
-                    <Eye className="h-4 w-4 mr-2" />
-                    View Full Details
-                  </Link>
-                </Button>
-                {latestTeamRun.status === 'failed' && (
-                  <Button variant="secondary" asChild onClick={() => {
-                    // Would re-run with same params
-                    alert('Re-run functionality would create a new team run');
-                  }}>
-                    <RotateCcw className="h-4 w-4 mr-2" />
-                    Re-run
-                  </Button>
-                )}
-                <Button variant="secondary" asChild>
-                  <Link href="/security-team">
-                    <Plus className="h-4 w-4 mr-2" />
-                    New Team Run
-                  </Link>
-                </Button>
-              </div>
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      <div className="grid gap-4 lg:grid-cols-2">
+      {/* Charts Row 1: Findings & Risk */}
+      <div className="grid gap-6 lg:grid-cols-2">
+        {/* Findings by Severity Pie Chart */}
         <Card>
           <CardHeader className="flex flex-row items-center justify-between">
-            <CardTitle>Recent Assets</CardTitle>
-            <Link href="/assets" className="text-sm text-accent-DEFAULT hover:text-accent-light font-medium">
-              View all →
-            </Link>
+            <CardTitle>Open Findings by Severity</CardTitle>
+            {openFindingsTotal > 0 && (
+              <Button variant="ghost" size="sm" asChild>
+                <Link href="/findings?status=open">
+                  <Eye className="h-4 w-4 mr-1" />
+                  View All
+                </Link>
+              </Button>
+            )}
           </CardHeader>
           <CardContent>
-            {assetsLoading ? (
-              <div className="space-y-3">
-                {Array.from({ length: 3 }).map((_, i) => (
-                  <Skeleton key={i} className="h-12 w-full" />
-                ))}
-              </div>
-            ) : assets && assets.length > 0 ? (
-              <div className="space-y-3">
-                {assets.slice(0, 5).map((asset) => (
-                  <div key={asset.id} className="flex items-center gap-3 p-3 hover:bg-background-tertiary/50 rounded-lg transition-colors">
-                    <div className="p-2 rounded-lg bg-accent-glow">
-                      {asset.type === 'repository' && <GitBranch className="h-5 w-5 text-accent-DEFAULT" />}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-foreground-DEFAULT truncate">{asset.name}</p>
-                      <p className="text-xs text-foreground-subtle font-mono capitalize">{asset.type}</p>
-                    </div>
-                    <StatusBadge status={asset.criticality as any} />
-                    <StatusBadge status={asset.status as any} />
-                  </div>
-                ))}
+            {openFindingsTotal > 0 ? (
+              <div className="h-64">
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      data={severityStats.filter(s => s.count > 0)}
+                      cx="50%"
+                      cy="50%"
+                      innerRadius={60}
+                      outerRadius={100}
+                      fill="#8884d8"
+                      paddingAngle={2}
+                      dataKey="count"
+                      nameKey="severity"
+                      label={({ severity, count, percent }) => `${severity}: ${count} (${(percent * 100).toFixed(0)}%)`}
+                      labelLine={false}
+                    >
+                      {severityStats.filter(s => s.count > 0).map((entry, index) => (
+                        <PieCell key={`cell-${index}`} fill={entry.color} />
+                      ))}
+                    </Pie>
+                    <Tooltip formatter={(value: number) => [value, 'findings']} />
+                    <Legend />
+                  </PieChart>
+                </ResponsiveContainer>
               </div>
             ) : (
-              <EmptyState
-                icon="Database"
-                title="No Assets Yet"
-                description="Add your first repository or API to start monitoring."
-                action={
-                  <Button onClick={() => {}} size="sm">
-                    <Plus className="h-4 w-4 mr-2" />
-                    Add Asset
-                  </Button>
-                }
-              />
+              <div className="h-64 flex items-center justify-center">
+                <EmptyState
+                  icon="CheckCircle"
+                  title="No Open Findings"
+                  description="All findings have been resolved or triaged."
+                />
+              </div>
             )}
           </CardContent>
         </Card>
 
+        {/* Risk Score Trend */}
         <Card>
           <CardHeader className="flex flex-row items-center justify-between">
-            <CardTitle>Workspaces</CardTitle>
-            <Link href="/team" className="text-sm text-accent-DEFAULT hover:text-accent-light font-medium">
-              Manage →
-            </Link>
+            <CardTitle>Risk Score Trend</CardTitle>
+            <Badge variant={riskScore >= 70 ? 'error' : riskScore >= 50 ? 'warning' : riskScore > 0 ? 'secondary' : 'success'} dot>
+              {riskScore > 0 ? riskBand.toUpperCase() : 'NO DATA'}
+            </Badge>
+          </CardHeader>
+          <CardContent>
+            {riskTrendData.length > 0 ? (
+              <div className="h-64">
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={riskTrendData}>
+                    <defs>
+                      <linearGradient id="riskColor" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor={RISK_BAND_COLORS[riskBand]} stopOpacity={0.3} />
+                        <stop offset="95%" stopColor={RISK_BAND_COLORS[riskBand]} stopOpacity={0} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                    <XAxis dataKey="date" stroke="#9ca3af" fontSize={10} />
+                    <YAxis
+                      stroke="#9ca3af"
+                      fontSize={10}
+                      domain={[0, Math.max(100, Math.max(...riskTrendData.map(d => d.value as number)) * 1.2)]}
+                      tickFormatter={(value) => value}
+                    />
+                    <Tooltip
+                      formatter={(value: number) => [value, 'Risk Score']}
+                      labelFormatter={(date) => `Date: ${date}`}
+                    />
+                    <Legend />
+                    <Area
+                      type="monotone"
+                      dataKey="value"
+                      stroke={RISK_BAND_COLORS[riskBand]}
+                      strokeWidth={2}
+                      fillOpacity={1}
+                      fill="url(#riskColor)"
+                      name="Risk Score"
+                    />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </div>
+            ) : (
+              <div className="h-64 flex items-center justify-center">
+                <EmptyState
+                  icon="BarChart3"
+                  title="No Risk Data"
+                  description={metrics.risk.total_attack_paths === 0
+                    ? 'Generate attack paths to see risk scores.'
+                    : 'Risk snapshots will appear here over time.'}
+                />
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Charts Row 2: Scans & Finding Flow */}
+      <div className="grid gap-6 lg:grid-cols-2">
+        {/* Scan Status Trend */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Scan Activity</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {scanTrendData.length > 0 ? (
+              <div className="h-64">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={scanTrendData}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                    <XAxis dataKey="date" stroke="#9ca3af" fontSize={10} />
+                    <YAxis stroke="#9ca3af" fontSize={10} />
+                    <Tooltip />
+                    <Legend />
+                    <Bar dataKey="completed" name="Completed" fill="#22c55e" radius={[4, 4, 0, 0]} />
+                    <Bar dataKey="failed" name="Failed" fill="#ef4444" radius={[4, 4, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            ) : (
+              <div className="h-64 flex items-center justify-center">
+                <EmptyState
+                  icon="Zap"
+                  title="No Scan Data"
+                  description="Run scans to see activity trends."
+                />
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Finding Flow: New vs Resolved */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Finding Flow</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {findingFlowData.length > 0 ? (
+              <div className="h-64">
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={findingFlowData}>
+                    <defs>
+                      <linearGradient id="newColor" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#ef4444" stopOpacity={0.3} />
+                        <stop offset="95%" stopColor="#ef4444" stopOpacity={0} />
+                      </linearGradient>
+                      <linearGradient id="resolvedColor" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#22c55e" stopOpacity={0.3} />
+                        <stop offset="95%" stopColor="#22c55e" stopOpacity={0} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                    <XAxis dataKey="date" stroke="#9ca3af" fontSize={10} />
+                    <YAxis stroke="#9ca3af" fontSize={10} />
+                    <Tooltip />
+                    <Legend />
+                    <Area
+                      type="monotone"
+                      dataKey="new"
+                      stroke="#ef4444"
+                      fillOpacity={1}
+                      fill="url(#newColor)"
+                      name="New Findings"
+                    />
+                    <Area
+                      type="monotone"
+                      dataKey="resolved"
+                      stroke="#22c55e"
+                      fillOpacity={1}
+                      fill="url(#resolvedColor)"
+                      name="Resolved Findings"
+                    />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </div>
+            ) : (
+              <div className="h-64 flex items-center justify-center">
+                <EmptyState
+                  icon="TrendingUp"
+                  title="No Finding Flow Data"
+                  description="Finding trends will appear as scans complete."
+                />
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Charts Row 3: Remediation & Verification */}
+      <div className="grid gap-6 lg:grid-cols-2">
+        {/* Remediation Progress */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Remediation Progress</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {remediationTrendData.length > 0 ? (
+              <div className="h-64">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={remediationTrendData}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                    <XAxis dataKey="date" stroke="#9ca3af" fontSize={10} />
+                    <YAxis stroke="#9ca3af" fontSize={10} />
+                    <Tooltip />
+                    <Legend />
+                    <Bar dataKey="proposed" name="Proposed" fill="#3b82f6" radius={[4, 4, 0, 0]} />
+                    <Bar dataKey="approved" name="Approved" fill="#f97316" radius={[4, 4, 0, 0]} />
+                    <Bar dataKey="applied" name="Applied" fill="#22c55e" radius={[4, 4, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            ) : (
+              <div className="h-64 flex items-center justify-center">
+                <EmptyState
+                  icon="Bot"
+                  title="No Remediation Data"
+                  description="Generate remediations to track progress."
+                />
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Verification Outcomes */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Verification Outcomes</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {verificationTrendData.length > 0 ? (
+              <div className="h-64">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={verificationTrendData}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                    <XAxis dataKey="date" stroke="#9ca3af" fontSize={10} />
+                    <YAxis stroke="#9ca3af" fontSize={10} />
+                    <Tooltip />
+                    <Legend />
+                    <Bar dataKey="verified" name="Verified" fill="#22c55e" radius={[4, 4, 0, 0]} />
+                    <Bar dataKey="failed" name="Failed" fill="#ef4444" radius={[4, 4, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            ) : (
+              <div className="h-64 flex items-center justify-center">
+                <EmptyState
+                  icon="Shield"
+                  title="No Verification Data"
+                  description="Start verifications to track outcomes."
+                />
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Summary Tables */}
+      <div className="grid gap-6 lg:grid-cols-3">
+        {/* Asset Summary */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Asset Summary</CardTitle>
           </CardHeader>
           <CardContent>
             <div className="space-y-3">
-              {workspaces.map((ws) => (
-                <Link key={ws.id} href="/team" className="flex items-center gap-3 p-3 hover:bg-background-tertiary/50 rounded-lg transition-colors">
-                  <div className="p-2 rounded-lg bg-accent-glow">
-                    <Shield className="h-5 w-5 text-accent-DEFAULT" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-foreground-DEFAULT truncate">{ws.name}</p>
-                    <p className="text-xs text-foreground-subtle font-mono">{ws.slug}</p>
-                  </div>
-                  <Badge variant="outline" className="capitalize">{ws.role}</Badge>
-                </Link>
+              <div className="flex justify-between">
+                <span className="text-gray-500">Total Assets</span>
+                <span className="font-medium">{metrics.assets.total_assets}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-500">Authorized</span>
+                <span className="font-medium text-green-600">{metrics.assets.assets_with_authorization}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-500">Unauthorized</span>
+                <span className="font-medium text-red-600">{metrics.assets.total_assets - metrics.assets.assets_with_authorization}</span>
+              </div>
+              <div className="pt-2 border-t">
+                <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-2">By Criticality</p>
+                <div className="space-y-1">
+                  {Object.entries(metrics.assets.assets_by_criticality).map(([crit, count]) => (
+                    <div key={crit} className="flex justify-between text-sm">
+                      <span className="capitalize">{crit}</span>
+                      <span className="font-medium">{count}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Scan Summary */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Scan Summary</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-3">
+              <div className="flex justify-between">
+                <span className="text-gray-500">Total Scans</span>
+                <span className="font-medium">{metrics.scans.total_scans}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-500">Completed</span>
+                <span className="font-medium text-green-600">{metrics.scans.scans_completed}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-500">Failed</span>
+                <span className="font-medium text-red-600">{metrics.scans.scans_failed}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-500">Running</span>
+                <span className="font-medium text-blue-600">{metrics.scans.scans_running}</span>
+              </div>
+              {metrics.scans.latest_completed_scan_at && (
+                <div className="pt-2 border-t text-sm text-gray-500">
+                  Latest: {formatDistanceToNow(new Date(metrics.scans.latest_completed_scan_at), { addSuffix: true })}
+                </div>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Verification Summary */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Verification Summary</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-3">
+              {Object.entries(metrics.verification.verification_outcomes).map(([outcome, count]) => (
+                <div key={outcome} className="flex justify-between">
+                  <span className="text-gray-500">{outcome.replace('_', ' ')}</span>
+                  <span className={`font-medium ${VERIFICATION_OUTCOME_COLORS[outcome] ? 'text-' + VERIFICATION_OUTCOME_COLORS[outcome].replace('#', '') : ''}`}>
+                    {count}
+                  </span>
+                </div>
               ))}
+              <div className="flex justify-between">
+                <span className="text-gray-500">Pending Review</span>
+                <span className="font-medium text-yellow-600">{metrics.verification.verification_jobs_by_status.PASSED_PENDING_REVIEW || 0}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-500">Regression Failures</span>
+                <span className="font-medium text-red-600">{metrics.verification.regression_failures}</span>
+              </div>
             </div>
           </CardContent>
         </Card>
       </div>
 
+      {/* Quick Actions */}
       <Card>
         <CardHeader>
           <CardTitle>Quick Actions</CardTitle>
@@ -371,30 +753,37 @@ export default function DashboardPage() {
           <div className="flex flex-wrap gap-3">
             <Button asChild>
               <Link href="/assets">
-                <Plus className="h-4 w-4" />
-                Add Asset
+                <Plus className="h-4 w-4 mr-2" /> Add Asset
               </Link>
             </Button>
             <Button variant="secondary" asChild>
-              <Link href="/team">
-                <Users className="h-4 w-4" />
-                Invite Team
+              <Link href="/scans">
+                <Zap className="h-4 w-4 mr-2" /> Start Scan
               </Link>
             </Button>
             <Button variant="secondary" asChild>
-              <Link href="/settings">
-                <Search className="h-4 w-4" />
-                Workspace Settings
+              <Link href="/findings">
+                <AlertTriangle className="h-4 w-4 mr-2" /> View Findings
               </Link>
             </Button>
-            <Button variant="secondary" disabled>
-              <Zap className="h-4 w-4" />
-              Start Scan
+            <Button variant="secondary" asChild>
+              <Link href="/reports/new">
+                <FileText className="h-4 w-4 mr-2" /> Generate Report
+              </Link>
+            </Button>
+            <Button variant="secondary" asChild>
+              <Link href="/reports">
+                <Download className="h-4 w-4 mr-2" /> View Reports
+              </Link>
             </Button>
             <Button variant="secondary" asChild>
               <Link href="/security-team">
-                <Bot className="h-4 w-4" />
-                Security Team
+                <Bot className="h-4 w-4 mr-2" /> Security Team
+              </Link>
+            </Button>
+            <Button variant="secondary" asChild>
+              <Link href="/verifications">
+                <Shield className="h-4 w-4 mr-2" /> Verifications
               </Link>
             </Button>
           </div>

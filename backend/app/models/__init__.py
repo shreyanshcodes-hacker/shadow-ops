@@ -1584,3 +1584,135 @@ class VerificationReview(Base):
 
     def __repr__(self) -> str:
         return f"<VerificationReview(job_id={self.verification_job_id}, decision={self.decision}, reviewed_by={self.reviewed_by})>"
+
+
+class ReportType(str, enum.Enum):
+    EXECUTIVE_SUMMARY = "executive_summary"
+    TECHNICAL_VULNERABILITY = "technical_vulnerability"
+    REMEDIATION_PROGRESS = "remediation_progress"
+    VERIFICATION_REGRESSION = "verification_regression"
+    ASSET_SECURITY_POSTURE = "asset_security_posture"
+
+
+class ReportFormat(str, enum.Enum):
+    PDF = "pdf"
+    JSON = "json"
+
+
+class ReportStatus(str, enum.Enum):
+    PENDING = "pending"
+    GENERATING = "generating"
+    READY = "ready"
+    FAILED = "failed"
+    EXPIRED = "expired"
+
+
+class Report(Base):
+    __tablename__ = "reports"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False, index=True)
+    report_type: Mapped[ReportType] = mapped_column(SQLEnum(ReportType), nullable=False)
+    title: Mapped[str] = mapped_column(Text, nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    format: Mapped[ReportFormat] = mapped_column(SQLEnum(ReportFormat), default=ReportFormat.PDF, nullable=False)
+    status: Mapped[ReportStatus] = mapped_column(SQLEnum(ReportStatus), default=ReportStatus.PENDING, nullable=False, index=True)
+    schema_version: Mapped[str] = mapped_column(Text, default="report-v1", nullable=False)
+    risk_engine_version: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    verification_policy_version: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    period_start: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    period_end: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    data_cutoff: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    filters: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
+    included_asset_ids: Mapped[List[uuid.UUID]] = mapped_column(ARRAY(UUID(as_uuid=True)), default=list, nullable=False)
+    severity_filters: Mapped[List[str]] = mapped_column(ARRAY(Text), default=list, nullable=False)
+    source_record_references: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
+    completeness: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
+    limitations: Mapped[List[str]] = mapped_column(ARRAY(Text), default=list, nullable=False)
+    generated_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("profiles.id", ondelete="RESTRICT"), nullable=False)
+    storage_object_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
+    storage_path: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    file_size_bytes: Mapped[Optional[int]] = mapped_column(nullable=True)
+    checksum: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    # Relationships
+    workspace: Mapped["Workspace"] = relationship("Workspace")
+    generator: Mapped["Profile"] = relationship("Profile", foreign_keys=[generated_by])
+    sections: Mapped[List["ReportSection"]] = relationship("ReportSection", back_populates="report", cascade="all, delete-orphan", order_by="ReportSection.section_order")
+    exports: Mapped[List["ReportExport"]] = relationship("ReportExport", back_populates="report", cascade="all, delete-orphan")
+
+    __table_args__ = (
+        Index("idx_reports_workspace_id", "workspace_id"),
+        Index("idx_reports_type", "report_type"),
+        Index("idx_reports_status", "status"),
+        Index("idx_reports_generated_by", "generated_by"),
+        Index("idx_reports_created_at", "created_at"),
+        Index("idx_reports_period", "period_start", "period_end"),
+        Index("idx_reports_expires_at", "expires_at"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<Report(id={self.id}, type={self.report_type}, status={self.status})>"
+
+
+class ReportSection(Base):
+    __tablename__ = "report_sections"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    report_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("reports.id", ondelete="CASCADE"), nullable=False, index=True)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False, index=True)
+    section_key: Mapped[str] = mapped_column(Text, nullable=False)
+    section_title: Mapped[str] = mapped_column(Text, nullable=False)
+    section_order: Mapped[int] = mapped_column(default=0, nullable=False)
+    content: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
+    data_references: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    # Relationships
+    report: Mapped["Report"] = relationship("Report", back_populates="sections")
+    workspace: Mapped["Workspace"] = relationship("Workspace")
+
+    __table_args__ = (
+        Index("idx_report_sections_report_id", "report_id"),
+        Index("idx_report_sections_workspace_id", "workspace_id"),
+        UniqueConstraint("report_id", "section_key", name="uq_report_section_key"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<ReportSection(report_id={self.report_id}, key={self.section_key})>"
+
+
+class ReportExport(Base):
+    __tablename__ = "report_exports"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    report_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("reports.id", ondelete="CASCADE"), nullable=False, index=True)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False, index=True)
+    format: Mapped[ReportFormat] = mapped_column(SQLEnum(ReportFormat), nullable=False)
+    storage_object_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
+    storage_path: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    file_size_bytes: Mapped[Optional[int]] = mapped_column(nullable=True)
+    checksum: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    generated_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("profiles.id", ondelete="RESTRICT"), nullable=False)
+    expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    # Relationships
+    report: Mapped["Report"] = relationship("Report", back_populates="exports")
+    workspace: Mapped["Workspace"] = relationship("Workspace")
+    generator: Mapped["Profile"] = relationship("Profile", foreign_keys=[generated_by])
+
+    __table_args__ = (
+        Index("idx_report_exports_report_id", "report_id"),
+        Index("idx_report_exports_workspace_id", "workspace_id"),
+        Index("idx_report_exports_created_at", "created_at"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<ReportExport(report_id={self.report_id}, format={self.format})>"

@@ -231,3 +231,8 @@ from app.services.comparison import EvidenceComparisonService
 from app.services.regression import RegressionAnalysisService
 from app.services.policy import VerificationPolicyEngine
 from app.services.verification import VerificationService
+from app.services.dashboard_metrics import DashboardMetricsService
+from app.services.trends import TrendService
+from app.services.report_service import ReportService
+from app.services.report_export import ReportExportService
+from app.services.report_storage import ReportStorageService
