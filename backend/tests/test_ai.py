@@ -12,8 +12,8 @@ from app.models import (
 )
 from app.schemas import FindingAiAnalysisResponse, AiRunResponse, AiProviderStatus
 from app.ai.manager import AIManager, AIManagerError
-from app.ai.schemas import FindingAnalysis, ScanAnalysis, FindingClassification, EvidenceCertainty
-from app.ai.validation import validate_finding_analysis, validate_scan_analysis, sanitize_analysis_output
+from app.ai.schemas import SecurityAnalysis as FindingAnalysis, ScanAnalysis, EvidenceCertainty
+from app.ai.validation import validate_security_analysis, validate_scan_analysis, sanitize_analysis_output
 from app.ai.safety import (
     redact_secrets, sanitize_for_ai, sanitize_evidence_dict,
     build_safe_prompt, validate_ai_output_references,

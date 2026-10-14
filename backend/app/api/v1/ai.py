@@ -6,7 +6,7 @@ from typing import List, Optional
 from app.db.session import get_db
 from app.security.auth import get_current_user, require_workspace_member
 from app.ai.manager import AIManager, AIManagerError
-from app.ai.schemas import (
+from app.schemas import (
     FindingAiAnalysisResponse,
     AiRunResponse,
     AiProviderStatus,

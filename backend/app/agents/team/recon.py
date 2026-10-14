@@ -2,6 +2,7 @@ import json
 import logging
 from typing import Dict, Any, List, Set
 from uuid import UUID
+from pydantic import BaseModel
 
 from app.ai.providers import AIProvider, AIModel
 from app.agents.team.base import (

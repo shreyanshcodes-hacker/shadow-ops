@@ -4,7 +4,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
-from app.api.deps import get_db, get_current_user
+from app.db.session import get_db
+from app.security.auth import get_current_user
 from app.models import Profile, VerificationStatus, VerificationPolicy
 from app.schemas import (
     VerificationJobListResponse,

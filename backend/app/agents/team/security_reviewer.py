@@ -1,3 +1,4 @@
+from pydantic import BaseModel
 import json
 import logging
 from typing import Dict, Any, List, Set

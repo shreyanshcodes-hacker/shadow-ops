@@ -656,6 +656,14 @@ class AttackPathStatus(str, enum.Enum):
     RESOLVED = "resolved"
 
 
+class RiskBand(str, enum.Enum):
+    INFORMATIONAL = "informational"
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+    CRITICAL = "critical"
+
+
 class AttackPath(Base):
     __tablename__ = "attack_paths"
 

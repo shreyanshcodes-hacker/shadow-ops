@@ -33,7 +33,6 @@ from app.repositories import (
     ScanRepository, ScanEventRepository, FindingRepository, FindingEvidenceRepository,
     AssetRepository, AssetAuthorizationRepository
 )
-from app.services.scans import ScanService
 from app.scanners.semgrep import SemgrepManager, SemgrepConfig, FindingNormalizer, NormalizedFinding
 from app.security.audit import audit_log
 
