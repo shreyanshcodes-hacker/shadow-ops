@@ -27,7 +27,7 @@ export default function SettingsPage() {
   const updateProfileMutation = useMutation({
     mutationFn: async (data: { display_name: string }) => {
       const token = await (await import('@/lib/auth')).getFirebaseToken();
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/api/v1/me`, {
+      const response = await fetch(`/api/v1/me`, {
         method: 'PATCH',
         headers: {
           'Authorization': `Bearer ${token}`,

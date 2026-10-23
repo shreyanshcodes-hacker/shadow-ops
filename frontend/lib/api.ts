@@ -1,8 +1,18 @@
 import { getFirebaseToken } from './auth';
 import { useAuthContext } from '@/components/providers/AuthProvider';
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 const API_VERSION = 'v1';
+
+// Use relative URLs by default (works via Vercel rewrites /api/* -> backend)
+// On server-side, can use BACKEND_URL binding for direct internal calls
+function getBaseUrl(): string {
+  // Server-side: use binding if available for direct internal calls
+  if (typeof window === 'undefined' && process.env.BACKEND_URL) {
+    return process.env.BACKEND_URL;
+  }
+  // Client-side or no binding: use relative URLs (routed by Vercel)
+  return '';
+}
 
 export interface ApiError {
   error: {
@@ -32,8 +42,8 @@ class ApiClient {
   private refreshing = false;
   private refreshPromise: Promise<string | null> | null = null;
 
-  constructor(baseUrl: string = API_BASE) {
-    this.baseUrl = baseUrl;
+  constructor(baseUrl?: string) {
+    this.baseUrl = baseUrl || getBaseUrl();
     this.defaultHeaders = {
       'Content-Type': 'application/json',
     };
@@ -74,7 +84,8 @@ class ApiClient {
     retryCount = 0
   ): Promise<T> {
     const headers = await this.getAuthHeaders();
-    const url = `${this.baseUrl}/api/${API_VERSION}${endpoint}`;
+    const base = this.baseUrl ? `${this.baseUrl}/api/${API_VERSION}` : `/api/${API_VERSION}`;
+    const url = `${base}${endpoint}`;
 
     const response = await fetch(url, {
       ...options,

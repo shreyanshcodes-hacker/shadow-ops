@@ -141,7 +141,8 @@ export async function fetchProfile(): Promise<ShadowOpsProfile | null> {
   const token = await getFirebaseToken();
   if (!token) return null;
 
-  const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/api/v1/me`, {
+  const baseUrl = process.env.BACKEND_URL || '';
+  const response = await fetch(`${baseUrl}/api/v1/me`, {
     headers: {
       'Authorization': `Bearer ${token}`,
       'Content-Type': 'application/json',
