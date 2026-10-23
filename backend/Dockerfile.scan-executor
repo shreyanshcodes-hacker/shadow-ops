@@ -1,0 +1,84 @@
+# =============================================================================
+# ShadowOps Scan Executor - Isolated Scan Execution Container
+# =============================================================================
+# This Dockerfile creates a minimal, hardened container for executing a SINGLE
+# semgrep scan with maximum isolation:
+# - Non-root user (UID 1000)
+# - Read-only root filesystem
+# - ALL Linux capabilities dropped
+# - NO network access (enforced by runtime --network=none)
+# - Resource limits (CPU, memory, processes, disk)
+# - NO access to host paths, Docker socket, cloud metadata
+# - NO application secrets (no env vars with secrets)
+# - Read-only input directory, bounded writable output directory
+# - Single scan execution then exit
+# =============================================================================
+
+# Build stage: Install semgrep
+FROM python:3.12-slim AS builder
+
+# Install build dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    libpq-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create virtual environment
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+# Install Python dependencies
+COPY requirements.txt .
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt
+
+# Install Semgrep in virtual environment
+RUN pip install --no-cache-dir semgrep==1.45.0
+
+# Verify semgrep installation
+RUN semgrep --version
+
+
+# Runtime stage: Minimal hardened image for single scan execution
+FROM python:3.12-slim AS runtime
+
+# Install runtime dependencies only (semgrep OCaml runtime)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libffi8 \
+    libgmp10 \
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get clean
+
+# Create non-root user and group
+RUN groupadd -r -g 1000 scanner && \
+    useradd -r -u 1000 -g scanner -d /home/scanner -s /bin/bash scanner
+
+# Create required directories with proper ownership
+RUN mkdir -p /home/scanner /scan-input /scan-output /tmp/semgrep-cache && \
+    chown -R scanner:scanner /home/scanner /scan-input /scan-output /tmp/semgrep-cache
+
+# Copy virtual environment from builder
+COPY --from=builder --chown=scanner:scanner /opt/venv /opt/venv
+
+# Copy scan executor script
+COPY --chown=scanner:scanner scan_executor.py /app/scan_executor.py
+
+# Set environment variables
+ENV PATH="/opt/venv/bin:$PATH"
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1
+# Semgrep cache directory (writable)
+ENV SEMGREP_CACHE_DIR=/tmp/semgrep-cache
+# Disable semgrep telemetry
+ENV SEMGREP_SEND_METRICS=off
+# Disable semgrep update checks
+ENV SEMGREP_AUTO_UPDATE=off
+
+# Switch to non-root user
+USER scanner:scanner
+
+# Working directory
+WORKDIR /app
+
+# Entry point: Run single scan execution
+ENTRYPOINT ["python", "/app/scan_executor.py"]

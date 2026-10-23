@@ -77,6 +77,12 @@ class Settings(BaseSettings):
     SCAN_PREP_TIMEOUT_SECONDS: int = 300
     SCAN_PARSE_TIMEOUT_SECONDS: int = 120
 
+    # Worker Configuration (Stage 12A - Scanner Isolation)
+    WORKER_SCAN_TIMEOUT: int = 1800
+    WORKER_MAX_TARGET_SIZE_MB: int = 1000
+    WORKER_MAX_FILE_SIZE_MB: int = 10
+    WORKER_SEMGREP_TIMEOUT: int = 1800
+
     # Logging
     LOG_LEVEL: str = "INFO"
 

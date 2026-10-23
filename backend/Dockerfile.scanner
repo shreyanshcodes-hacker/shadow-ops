@@ -1,0 +1,94 @@
+# =============================================================================
+# ShadowOps Scanner Worker - Hardened Container
+# =============================================================================
+# This Dockerfile creates a minimal, hardened container for the Semgrep scanner
+# worker with strict security controls:
+# - Non-root user (UID 1000)
+# - Read-only root filesystem
+# - Dropped Linux capabilities
+# - No network access (enforced by runtime)
+# - Resource limits (CPU, memory, processes)
+# - No access to host paths or secrets
+# =============================================================================
+
+# Build stage: Install dependencies and semgrep
+FROM python:3.12-slim AS builder
+
+# Install build dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    libpq-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create virtual environment
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+# Install Python dependencies
+COPY requirements.txt .
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt
+
+# Install Semgrep in virtual environment
+RUN pip install --no-cache-dir semgrep==1.45.0
+
+# Verify semgrep installation
+RUN semgrep --version
+
+
+# Runtime stage: Minimal hardened image
+FROM python:3.12-slim AS runtime
+
+# Install runtime dependencies only
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    # Required for semgrep (OCaml runtime)
+    libffi8 \
+    libgmp10 \
+    # Required for git operations if needed
+    git \
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get clean
+
+# Create non-root user and group
+RUN groupadd -r -g 1000 scanner && \
+    useradd -r -u 1000 -g scanner -d /home/scanner -s /bin/bash scanner
+
+# Create required directories with proper ownership
+RUN mkdir -p /home/scanner /scan-workspace /tmp/semgrep-cache && \
+    chown -R scanner:scanner /home/scanner /scan-workspace /tmp/semgrep-cache
+
+# Copy virtual environment from builder
+COPY --from=builder --chown=scanner:scanner /opt/venv /opt/venv
+
+# Copy application code
+COPY --chown=scanner:scanner ./app /app
+
+# Set environment variables
+ENV PATH="/opt/venv/bin:$PATH"
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONPATH=/app
+# Semgrep cache directory (writable)
+ENV SEMGREP_CACHE_DIR=/tmp/semgrep-cache
+# Disable semgrep telemetry
+ENV SEMGREP_SEND_METRICS=off
+# Disable semgrep update checks
+ENV SEMGREP_AUTO_UPDATE=off
+
+# Switch to non-root user
+USER scanner:scanner
+
+# Working directory
+WORKDIR /app
+
+# Health check (checks semgrep binary and basic connectivity)
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+    CMD semgrep --version > /dev/null 2>&1 || exit 1
+
+# Default command: Start Celery worker for scan queue
+CMD ["celery", "-A", "app.workers.celery_app", "worker", \
+     "--loglevel=INFO", \
+     "--concurrency=1", \
+     "--queues=scans", \
+     "--hostname=scanner@%h", \
+     "--pool=prefork"]

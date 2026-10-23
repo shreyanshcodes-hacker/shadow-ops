@@ -1,8 +1,9 @@
 from typing import Optional, List, Dict, Any
-from uuid import UUID
+from uuid import UUID, uuid4
 from datetime import datetime
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+import logging
 
 from app.repositories import (
     ScanRepository,
@@ -25,7 +26,10 @@ from app.schemas import (
     ScanCreate, ScanUpdate, ScanTargetCreate, ScanTargetUpdate
 )
 from app.scanning.runner import ScanJobRunner, ScanJobError
+from app.workers.scan_worker import execute_scan_job
 from app.security.audit import audit_log
+
+logger = logging.getLogger(__name__)
 
 
 class ScanService:
@@ -165,6 +169,46 @@ class ScanService:
             },
             user_id=user_id,
         )
+
+        # Enqueue scan job for isolated worker execution
+        idempotency_key = f"scan-{scan.id}-{uuid4().hex[:16]}"
+        job_payload = {
+            "scan_id": str(scan.id),
+            "workspace_id": str(workspace_id),
+            "asset_id": str(data.asset_id),
+            "idempotency_key": idempotency_key,
+            "scan_profile": data.scan_profile.value,
+            "scan_type": data.scan_type.value,
+        }
+        
+        # Store idempotency key in scan config for deduplication
+        await self.scan_repo.update(scan.id, {
+            "scan_config": {**data.scan_config, "idempotency_key": idempotency_key}
+        })
+        
+        # Enqueue the scan job
+        try:
+            execute_scan_job.delay(job_payload)
+            logger.info(f"Enqueued scan job {scan.id} with idempotency key {idempotency_key}")
+        except Exception as e:
+            logger.error(f"Failed to enqueue scan job {scan.id}: {e}")
+            # Mark scan as failed if queueing fails
+            await self.scan_repo.update(scan.id, {
+                "status": ScanStatus.FAILED,
+                "failed_at": datetime.utcnow(),
+                "error_code": "QUEUE_FAILED",
+                "error_message": f"Failed to enqueue scan job: {str(e)}",
+                "current_phase": "queued",
+            })
+            await self._emit_event(
+                scan_id=scan.id,
+                workspace_id=workspace_id,
+                phase="failure",
+                event_type=ScanEventType.SCAN_FAILED.value,
+                message=f"Failed to enqueue scan job: {str(e)}",
+                data={"error_code": "QUEUE_FAILED", "error_message": str(e)}
+            )
+            raise ValueError(f"Failed to enqueue scan job: {e}")
 
         return scan
 
@@ -382,13 +426,71 @@ class ScanService:
 
     async def execute_scan(self, scan_id: UUID) -> Scan:
         """
-        Execute a scan using the ScanJobRunner.
+        Enqueue a scan for execution by the isolated worker.
         
-        This is the main entry point for scan execution.
-        It creates a runner and delegates the execution.
+        This method transitions the scan from QUEUED to RUNNING and enqueues
+        the job for the isolated scanner worker.
         """
-        runner = ScanJobRunner(self.db)
-        return await runner.execute_scan(scan_id)
+        scan = await self.scan_repo.get_by_id(scan_id)
+        if not scan:
+            raise ValueError("Scan not found")
+
+        if scan.status != ScanStatus.QUEUED:
+            raise ValueError(f"Scan is not in QUEUED status (current: {scan.status.value})")
+
+        # Get idempotency key from scan config
+        idempotency_key = scan.scan_config.get("idempotency_key") if scan.scan_config else None
+        if not idempotency_key:
+            idempotency_key = f"scan-{scan.id}-{uuid4().hex[:16]}"
+            await self.scan_repo.update(scan_id, {
+                "scan_config": {**scan.scan_config, "idempotency_key": idempotency_key}
+            })
+
+        # Enqueue the scan job
+        job_payload = {
+            "scan_id": str(scan_id),
+            "workspace_id": str(scan.workspace_id),
+            "asset_id": str(scan.asset_id),
+            "idempotency_key": idempotency_key,
+            "scan_profile": scan.scan_profile.value if scan.scan_profile else "CODE_SECURITY",
+            "scan_type": scan.scan_type.value if scan.scan_type else "code",
+        }
+        
+        try:
+            execute_scan_job.delay(job_payload)
+            logger.info(f"Enqueued scan job {scan_id} with idempotency key {idempotency_key}")
+        except Exception as e:
+            logger.error(f"Failed to enqueue scan job {scan_id}: {e}")
+            # Mark scan as failed if queueing fails
+            await self.scan_repo.update(scan_id, {
+                "status": ScanStatus.FAILED,
+                "failed_at": datetime.utcnow(),
+                "error_code": "QUEUE_FAILED",
+                "error_message": f"Failed to enqueue scan job: {str(e)}",
+                "current_phase": "queued",
+            })
+            raise ValueError(f"Failed to enqueue scan job: {e}")
+
+        # Update status to RUNNING (worker will update when it starts)
+        update_data = {
+            "status": ScanStatus.RUNNING,
+            "started_at": datetime.utcnow(),
+            "current_phase": "queued",
+            "progress_percent": 5,
+        }
+        scan = await self.scan_repo.update(scan_id, update_data)
+
+        # Emit scan started event
+        await self._emit_event(
+            scan_id=scan_id,
+            workspace_id=scan.workspace_id,
+            phase="execution",
+            event_type=ScanEventType.SCAN_STARTED.value,
+            message="Scan execution started in isolated worker",
+            data={"started_at": datetime.utcnow().isoformat()}
+        )
+
+        return scan
 
     async def get_scan_events(self, scan_id: UUID) -> List[ScanEvent]:
         return await self.event_repo.get_by_scan(scan_id)
